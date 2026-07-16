@@ -382,7 +382,7 @@ const AI_ENGINE = {
     },
 
     // ─── Strategy: Fal.ai Inpainting (SDXL Fast / FLUX.1 Fill queue) ────────
-    async callFalInpainting(imageDataUrl, maskDataUrl, prompt) {
+    async callFalInpainting(imageDataUrl, maskDataUrl, prompt, onProgress) {
         const token = this.getFalToken();
         if (!token) throw new Error('No Fal.ai token configured.');
 
@@ -563,7 +563,7 @@ const AI_ENGINE = {
             
             try {
                 const prompt = await this.generatePrompt(materialNode);
-                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt);
+                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt, onProgress);
                 onProgress('Compositing final result...');
                 return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
             } catch (err) {
