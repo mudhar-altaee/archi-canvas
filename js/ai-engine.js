@@ -405,7 +405,7 @@ const AI_ENGINE = {
                 mask_url:           maskDataUrl,
                 prompt:             prompt,
                 num_inference_steps: 28,
-                guidance_scale:     30,
+                guidance_scale:     10,
                 output_format:      'jpeg'
             })
         });
