@@ -412,7 +412,8 @@ const AI_ENGINE = {
         const requestId = submitResult.request_id;
         if (!requestId) throw new Error('Fal.ai queue did not return a request ID.');
 
-        const statusUrl = `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}/status`;
+        // Use the official status_url returned directly by the API
+        const statusUrl = submitResult.status_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}/status`;
         
         for (let i = 0; i < 120; i++) { // Max 120 seconds for cold start
             await new Promise(res => setTimeout(res, 1000));
@@ -443,7 +444,7 @@ const AI_ENGINE = {
 
             if (pollResult.status === 'COMPLETED') {
                 // Fetch the response payload from response_url
-                const responseUrl = pollResult.response_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
+                const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
                 const resultResp = await fetch(responseUrl, {
                     headers: { 'Authorization': `Key ${token}` }
                 });
