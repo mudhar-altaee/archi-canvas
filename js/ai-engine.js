@@ -539,6 +539,7 @@ const AI_ENGINE = {
                 return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
             } catch (err) {
                 console.warn('Fal.ai failed, falling back to classic:', err.message);
+                alert(`AI Error (Fal.ai): ${err.message}\n\nسيتراجع البرنامج الآن للوضع الكلاسيكي.`);
                 onProgress('Fal.ai failed – returning classic texture result...');
             }
         }
