@@ -414,7 +414,7 @@ const AI_ENGINE = {
 
         const statusUrl = `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}/status`;
         
-        for (let i = 0; i < 45; i++) {
+        for (let i = 0; i < 120; i++) { // Max 120 seconds for cold start
             await new Promise(res => setTimeout(res, 1000));
             const pollResp = await fetch(statusUrl, {
                 headers: { 'Authorization': `Key ${token}` }
@@ -422,6 +422,15 @@ const AI_ENGINE = {
             if (!pollResp.ok) continue;
 
             const pollResult = await pollResp.json();
+            
+            // Show real-time queue position or progress to user
+            if (pollResult.status === 'IN_QUEUE') {
+                const pos = pollResult.queue_position !== undefined ? ` (الترتيب: ${pollResult.queue_position})` : '';
+                onProgress(`في طابور الانتظار${pos}...`);
+            } else if (pollResult.status === 'IN_PROGRESS') {
+                onProgress('جاري معالجة وتوليد الماتريال مع المنظور...');
+            }
+
             if (pollResult.status === 'COMPLETED') {
                 // Fetch the response payload from response_url
                 const responseUrl = pollResult.response_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
@@ -441,7 +450,7 @@ const AI_ENGINE = {
                 throw new Error('Fal.ai queue task failed: ' + JSON.stringify(pollResult.error || 'Unknown error'));
             }
         }
-        throw new Error('Fal.ai request timed out.');
+        throw new Error('Fal.ai request timed out (120s).');
     },
 
     // ─── Composite result onto full-resolution original ───────────────────────
