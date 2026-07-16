@@ -2528,9 +2528,9 @@ export class MaterialNode extends Node {
             return;
         }
         
-        // AI PATH: Use Hugging Face Inpainting if token is available
+        // AI PATH: Use Fal.ai Inpainting if token is available
         const aiEngine = this.app.aiEngine;
-        if (aiEngine && aiEngine.hasToken()) {
+        if (aiEngine && aiEngine.hasFalToken()) {
             this.btnPlay.style.opacity = '0.5';
             this.btnPlay.disabled = true;
             this.app.showAILoading('Preparing images for AI...');
