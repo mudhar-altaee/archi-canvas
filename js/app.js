@@ -1,6 +1,7 @@
 import { Canvas } from './canvas.js';
 import { ConnectionsManager } from './connections.js';
 import { ColorNode, ImageNode, RecolorNode, MaterialNode } from './nodes.js';
+import AI_ENGINE from './ai-engine.js';
 
 // IndexedDB Database Helpers to store project state without localStorage size limit (5MB)
 const dbName = 'ArchiCanvasDB';
@@ -127,8 +128,98 @@ class App {
         // Auto-save on page exit
         window.addEventListener('beforeunload', () => this.saveProject(this.activeProjectName));
         window.addEventListener('pagehide', () => this.saveProject(this.activeProjectName));
+
+        // Initialize AI Engine UI
+        this.aiEngine = AI_ENGINE;
+        this.initAI();
     }
     
+    // ─── AI Engine UI ──────────────────────────────────────────────────────
+    initAI() {
+        const tokenModal    = document.getElementById('ai-token-modal');
+        const tokenInput    = document.getElementById('ai-token-input');
+        const tokenSaveBtn  = document.getElementById('ai-token-save');
+        const tokenSkipBtn  = document.getElementById('ai-token-skip');
+        const settingsBtn   = document.getElementById('btn-ai-settings');
+        const statusDot     = document.getElementById('ai-status-dot');
+
+        // Update status dot based on token presence
+        const updateStatusDot = () => {
+            if (statusDot) {
+                statusDot.classList.toggle('connected', this.aiEngine.hasToken());
+            }
+        };
+        updateStatusDot();
+
+        // Show modal on first load if no token
+        if (!this.aiEngine.hasToken()) {
+            setTimeout(() => { if (tokenModal) tokenModal.classList.add('active'); }, 800);
+        }
+
+        // AI Settings button → open token modal
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => {
+                if (tokenModal) {
+                    if (tokenInput) tokenInput.value = this.aiEngine.getToken();
+                    tokenModal.classList.add('active');
+                }
+            });
+        }
+
+        // Save token button
+        if (tokenSaveBtn) {
+            tokenSaveBtn.addEventListener('click', () => {
+                const val = tokenInput ? tokenInput.value.trim() : '';
+                if (!val || !val.startsWith('hf_')) {
+                    tokenInput.style.borderColor = '#ef4444';
+                    tokenInput.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
+                    tokenInput.placeholder = 'Token يجب أن يبدأ بـ hf_';
+                    setTimeout(() => {
+                        tokenInput.style.borderColor = '';
+                        tokenInput.style.boxShadow = '';
+                        tokenInput.placeholder = 'hf_xxxxxxxxxxxxxxxxxxxxxxxx';
+                    }, 2000);
+                    return;
+                }
+                this.aiEngine.setToken(val);
+                updateStatusDot();
+                if (tokenModal) tokenModal.classList.remove('active');
+            });
+        }
+
+        // Skip button → close without saving
+        if (tokenSkipBtn) {
+            tokenSkipBtn.addEventListener('click', () => {
+                if (tokenModal) tokenModal.classList.remove('active');
+            });
+        }
+
+        // Close modal on backdrop click
+        if (tokenModal) {
+            tokenModal.addEventListener('click', (e) => {
+                if (e.target === tokenModal) tokenModal.classList.remove('active');
+            });
+        }
+    }
+
+    // ─── AI Loading UI ────────────────────────────────────────────────────
+    showAILoading(message = 'Processing...') {
+        const overlay = document.getElementById('ai-loading-overlay');
+        const status  = document.getElementById('ai-loading-status');
+        if (overlay) overlay.classList.add('active');
+        if (status)  status.textContent = message;
+    }
+
+    updateAILoadingStatus(message) {
+        const status = document.getElementById('ai-loading-status');
+        if (status) status.textContent = message;
+    }
+
+    hideAILoading() {
+        const overlay = document.getElementById('ai-loading-overlay');
+        if (overlay) overlay.classList.remove('active');
+    }
+
     async initActiveProject(projectName) {
         const loaded = await this.loadProject(projectName);
         if (!loaded) {

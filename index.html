@@ -3,12 +3,251 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Architectural Node Canvas</title>
+    <title>ArchiCanvas – AI Material Studio</title>
     <!-- Google Fonts for premium typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+
+    <style>
+        /* ── AI Loading Overlay ────────────────────────────────── */
+        #ai-loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(10, 12, 20, 0.82);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 22px;
+        }
+        #ai-loading-overlay.active { display: flex; }
+
+        .ai-loading-card {
+            background: linear-gradient(135deg, #1a1f35 0%, #0f1525 100%);
+            border: 1px solid rgba(99,102,241,0.35);
+            border-radius: 20px;
+            padding: 36px 44px;
+            text-align: center;
+            box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.1);
+            max-width: 380px;
+            width: 90%;
+        }
+
+        .ai-loading-icon {
+            font-size: 48px;
+            margin-bottom: 8px;
+            animation: ai-pulse 2s ease-in-out infinite;
+        }
+        @keyframes ai-pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50%       { transform: scale(1.12); opacity: 0.75; }
+        }
+
+        .ai-loading-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 6px;
+        }
+
+        .ai-loading-status {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 13px;
+            color: #94a3b8;
+            min-height: 20px;
+            transition: opacity 0.3s;
+        }
+
+        .ai-progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(99,102,241,0.15);
+            border-radius: 99px;
+            margin-top: 18px;
+            overflow: hidden;
+        }
+        .ai-progress-fill {
+            height: 100%;
+            width: 30%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1);
+            background-size: 200% 100%;
+            border-radius: 99px;
+            animation: ai-shimmer 1.8s linear infinite;
+        }
+        @keyframes ai-shimmer {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ── AI Token Setup Modal ──────────────────────────────── */
+        #ai-token-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(5, 8, 18, 0.88);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            align-items: center;
+            justify-content: center;
+        }
+        #ai-token-modal.active { display: flex; }
+
+        .ai-modal-card {
+            background: linear-gradient(145deg, #1e2440 0%, #141828 100%);
+            border: 1px solid rgba(99,102,241,0.4);
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 460px;
+            width: 92%;
+            box-shadow: 0 40px 100px rgba(0,0,0,0.7);
+            animation: modal-in 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+        }
+        @keyframes modal-in {
+            from { opacity: 0; transform: scale(0.88) translateY(24px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .ai-modal-header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+        .ai-modal-logo {
+            width: 48px; height: 48px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 8px 24px rgba(99,102,241,0.4);
+        }
+        .ai-modal-title { font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 700; color: #f1f5f9; }
+        .ai-modal-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; }
+
+        .ai-modal-desc {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 13.5px;
+            color: #94a3b8;
+            line-height: 1.65;
+            margin-bottom: 22px;
+            padding: 14px;
+            background: rgba(99,102,241,0.06);
+            border-radius: 10px;
+            border-left: 3px solid rgba(99,102,241,0.5);
+        }
+
+        .ai-modal-label {
+            display: block;
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+
+        .ai-token-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 13px 16px;
+            background: rgba(15,20,40,0.8);
+            border: 1px solid rgba(99,102,241,0.3);
+            border-radius: 10px;
+            color: #e2e8f0;
+            font-family: 'Plus Jakarta Sans', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            margin-bottom: 18px;
+        }
+        .ai-token-input:focus {
+            border-color: rgba(99,102,241,0.7);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+        }
+        .ai-token-input::placeholder { color: #334155; }
+
+        .ai-modal-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #6366f1;
+            text-decoration: none;
+            margin-bottom: 24px;
+        }
+        .ai-modal-link:hover { color: #818cf8; text-decoration: underline; }
+
+        .ai-modal-buttons { display: flex; gap: 10px; }
+
+        .ai-btn-primary {
+            flex: 1;
+            padding: 12px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            box-shadow: 0 6px 20px rgba(99,102,241,0.35);
+        }
+        .ai-btn-primary:hover  { opacity: 0.9; transform: translateY(-1px); }
+        .ai-btn-primary:active { transform: translateY(0); }
+
+        .ai-btn-skip {
+            padding: 12px 20px;
+            background: transparent;
+            color: #64748b;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .ai-btn-skip:hover { background: rgba(255,255,255,0.05); color: #94a3b8; }
+
+        /* ── AI Settings Toolbar Button ────────────────────────── */
+        .ai-settings-btn {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1));
+            border: 1px solid rgba(99,102,241,0.3);
+            border-radius: 10px;
+            color: #a5b4fc;
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            justify-content: center;
+        }
+        .ai-settings-btn:hover {
+            background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.2));
+            border-color: rgba(99,102,241,0.5);
+            color: #c7d2fe;
+        }
+        .ai-status-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            flex-shrink: 0;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .ai-status-dot.connected {
+            background: #22c55e;
+            box-shadow: 0 0 6px #22c55e;
+        }
+    </style>
 </head>
 <body>
     <!-- App Container -->
@@ -17,7 +256,7 @@
         <header class="toolbar-panel">
             <div class="logo">
                 <span class="logo-icon">📐</span>
-                <span class="logo-text">ArchiCanvas <span class="badge">v1.0</span></span>
+                <span class="logo-text">ArchiCanvas <span class="badge">AI</span></span>
             </div>
             
             <div class="divider"></div>
@@ -36,6 +275,17 @@
                 <div class="recent-projects-container" style="width: 100%;">
                     <span class="section-title">Saved Projects</span>
                     <div id="recent-projects-list" style="margin-top: 5px;"></div>
+                </div>
+
+                <!-- AI Settings Button -->
+                <div style="margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+                    <button id="btn-ai-settings" class="ai-settings-btn" title="AI Material Engine Settings">
+                        <span class="ai-status-dot" id="ai-status-dot"></span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                        </svg>
+                        AI Settings
+                    </button>
                 </div>
             </div>
         </header>
@@ -88,6 +338,61 @@
             <div class="status-item font-mono" id="zoom-indicator">Zoom: 100%</div>
             <div class="status-item hint">Drag canvas to Pan • Scroll to Zoom • Drag sockets to Connect</div>
         </footer>
+    </div>
+
+    <!-- ── AI Loading Overlay ──────────────────────────────────────────── -->
+    <div id="ai-loading-overlay">
+        <div class="ai-loading-card">
+            <div class="ai-loading-icon">🧠</div>
+            <div class="ai-loading-title">AI is applying your material</div>
+            <div class="ai-loading-status" id="ai-loading-status">Initializing...</div>
+            <div class="ai-progress-bar">
+                <div class="ai-progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── AI Token Setup Modal ───────────────────────────────────────── -->
+    <div id="ai-token-modal">
+        <div class="ai-modal-card">
+            <div class="ai-modal-header">
+                <div class="ai-modal-logo">🤖</div>
+                <div>
+                    <div class="ai-modal-title">AI Material Engine</div>
+                    <div class="ai-modal-subtitle">Powered by Hugging Face</div>
+                </div>
+            </div>
+
+            <div class="ai-modal-desc">
+                لتطبيق المتيريال بطريقة واقعية مثل Vectary، البرنامج يستخدم نموذج AI مجاني من Hugging Face.<br><br>
+                تحتاج فقط <strong style="color:#a5b4fc">حساب مجاني</strong> على huggingface.co وتنسخ الـ Access Token منه.
+            </div>
+
+            <label class="ai-modal-label">Hugging Face Access Token</label>
+            <input
+                id="ai-token-input"
+                class="ai-token-input"
+                type="password"
+                placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx"
+                autocomplete="off"
+                spellcheck="false"
+            />
+
+            <a
+                href="https://huggingface.co/settings/tokens"
+                target="_blank"
+                rel="noopener"
+                class="ai-modal-link"
+            >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                احصل على Token مجاني من huggingface.co/settings/tokens
+            </a>
+
+            <div class="ai-modal-buttons">
+                <button id="ai-token-save" class="ai-btn-primary">✨ تفعيل AI</button>
+                <button id="ai-token-skip" class="ai-btn-skip">تخطي</button>
+            </div>
+        </div>
     </div>
 
     <!-- JS Scripts (Modular imports) -->

@@ -2528,6 +2528,56 @@ export class MaterialNode extends Node {
             return;
         }
         
+        // AI PATH: Use Hugging Face Inpainting if token is available
+        const aiEngine = this.app.aiEngine;
+        if (aiEngine && aiEngine.hasToken()) {
+            this.btnPlay.style.opacity = '0.5';
+            this.btnPlay.disabled = true;
+            this.app.showAILoading('Preparing images for AI...');
+
+            aiEngine.applyMaterial(
+                srcImageNode,
+                srcTextureNode,
+                (msg) => this.app.updateAILoadingStatus(msg)
+            ).then((finalDataUrl) => {
+                this.app.hideAILoading();
+                this.recoloredDataUrl = finalDataUrl;
+
+                const spawnX = this.x + this.width + 50;
+                const spawnY = this.y;
+                const newId = this.app.nodeIdCounter++;
+                const newImageNode = new ImageNode(newId, spawnX, spawnY, this.canvas, this.app);
+                newImageNode.imageUrl = finalDataUrl;
+                newImageNode.aspectRatio = srcImageNode.aspectRatio || 1.0;
+                this.app.nodes.set(newId, newImageNode);
+                const dom = newImageNode.createDOM();
+                this.app.nodesLayer.appendChild(dom);
+                dom.style.zIndex = this.app.getNextZIndex();
+                newImageNode.update();
+                this.app.saveProject(this.app.activeProjectName);
+
+            }).catch((err) => {
+                this.app.hideAILoading();
+                console.error('AI material application failed:', err);
+                const useClassic = confirm(
+                    'AI Error: ' + err.message + '\n\nUse Classic Mode instead (fast, no internet)?'
+                );
+                if (useClassic) {
+                    this._classicProcessAndSpawn(srcImageNode, srcTextureNode, srcImgUrl, textureImgUrl);
+                }
+            }).finally(() => {
+                this.btnPlay.style.opacity = '1';
+                this.btnPlay.disabled = false;
+            });
+
+            return; // Skip classic path
+        }
+
+        // CLASSIC PATH: Canvas-based texture overlay (no AI token)
+        this._classicProcessAndSpawn(srcImageNode, srcTextureNode, srcImgUrl, textureImgUrl);
+    }
+
+    _classicProcessAndSpawn(srcImageNode, srcTextureNode, srcImgUrl, textureImgUrl) {
         this.btnPlay.style.opacity = '0.5';
         this.btnPlay.disabled = true;
         
