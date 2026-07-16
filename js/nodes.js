@@ -2582,7 +2582,7 @@ export class MaterialNode extends Node {
                             const y = Math.floor(pixelIndex / canvasW);
                             
                             let tu = 0;
-                            let tv = mHeight > 0 ? (y - yMin) / mHeight : 0;
+                            let tv = mWidth > 0 ? ((y - yMin) / mWidth) * (texW / texH) : 0;
                             
                             if (hasVerticalCorner) {
                                 // Split mapping at the corner to warp both surfaces separately
