@@ -446,15 +446,25 @@ const AI_ENGINE = {
             }
 
             if (pollResult.status === 'COMPLETED') {
+                // Some models embed images directly in the COMPLETED status response
+                if (pollResult.images?.[0]?.url) {
+                    const imgResp = await fetch(pollResult.images[0].url);
+                    return await imgResp.blob();
+                }
+
+                // Otherwise fetch from response_url
                 const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/flux/fill/requests/${requestId}`;
                 const resultResp = await fetch(responseUrl, {
                     headers: { 'Authorization': `Key ${token}` }
                 });
-                if (!resultResp.ok) throw new Error('Failed to retrieve FLUX.1 Fill output.');
+                if (!resultResp.ok) {
+                    const errBody = await resultResp.text().catch(() => '');
+                    throw new Error(`Failed to retrieve FLUX.1 Fill output (${resultResp.status}): ${errBody.slice(0, 200)}`);
+                }
 
                 const resultData = await resultResp.json();
-                const imgUrl = resultData.images?.[0]?.url;
-                if (!imgUrl) throw new Error('FLUX.1 Fill output did not contain any images.');
+                const imgUrl = resultData.images?.[0]?.url || resultData.image?.url;
+                if (!imgUrl) throw new Error('FLUX.1 Fill output did not contain any images. Raw: ' + JSON.stringify(resultData).slice(0, 200));
 
                 const imgResp = await fetch(imgUrl);
                 return await imgResp.blob();
