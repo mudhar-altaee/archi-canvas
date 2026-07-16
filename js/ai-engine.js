@@ -335,6 +335,9 @@ const AI_ENGINE = {
             'blurry', 'flat texture', 'deformed geometry', 'text', 'watermark', 'bad shading'
         ].join(', ');
 
+        return await this.callStabilityAI(preTexturedBlob, maskBlob, prompt);
+    },
+
     // ─── Strategy A: Fal.ai Inpainting (SDXL Fast - CORS supported via direct keys) ───
     async callFalInpainting(imageDataUrl, maskDataUrl, prompt) {
         const token = this.getFalToken();
