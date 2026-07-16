@@ -563,8 +563,8 @@ const AI_ENGINE = {
             
             const hasPins = (srcImageNode.perspectivePlanes && srcImageNode.perspectivePlanes.length > 0) || 
                             (srcImageNode.perspectiveQuad && srcImageNode.perspectiveQuad.length > 0);
-            // 0.30 if hand-warped by pins; 0.80 if no pins (gives AI freedom to project onto walls automatically)
-            const strength = hasPins ? 0.30 : 0.80;
+            // 0.30 if hand-warped by pins; 0.95 if no pins (gives AI freedom to project onto walls automatically)
+            const strength = hasPins ? 0.30 : 0.95;
 
             try {
                 const prompt = await this.generatePrompt(materialNode);
