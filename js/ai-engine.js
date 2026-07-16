@@ -419,8 +419,6 @@ const AI_ENGINE = {
             const pollResp = await fetch(statusUrl, {
                 headers: { 'Authorization': `Key ${token}` }
             });
-            if (!pollResp.ok) continue;
-
             const pollResult = await pollResp.json();
             
             // Show real-time queue position or progress to user
