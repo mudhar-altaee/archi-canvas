@@ -136,65 +136,73 @@ class App {
     
     // ─── AI Engine UI ──────────────────────────────────────────────────────
     initAI() {
-        const tokenModal    = document.getElementById('ai-token-modal');
-        const tokenInput    = document.getElementById('ai-token-input');
-        const tokenSaveBtn  = document.getElementById('ai-token-save');
-        const tokenSkipBtn  = document.getElementById('ai-token-skip');
-        const settingsBtn   = document.getElementById('btn-ai-settings');
-        const statusDot     = document.getElementById('ai-status-dot');
+        const tokenModal       = document.getElementById('ai-token-modal');
+        const hfTokenInput     = document.getElementById('ai-token-input');
+        const stabTokenInput   = document.getElementById('stability-token-input');
+        const tokenSaveBtn     = document.getElementById('ai-token-save');
+        const tokenSkipBtn     = document.getElementById('ai-token-skip');
+        const settingsBtn      = document.getElementById('btn-ai-settings');
+        const statusDot        = document.getElementById('ai-status-dot');
 
-        // Update status dot based on token presence
+        // Status dot = green if either token is present
         const updateStatusDot = () => {
             if (statusDot) {
-                statusDot.classList.toggle('connected', this.aiEngine.hasToken());
+                const hasAny = this.aiEngine.hasToken() || this.aiEngine.hasStabilityToken();
+                statusDot.classList.toggle('connected', hasAny);
             }
         };
         updateStatusDot();
 
-        // Show modal on first load if no token
-        if (!this.aiEngine.hasToken()) {
+        // Show modal on first load if no tokens at all
+        const hasAny = this.aiEngine.hasToken() || this.aiEngine.hasStabilityToken();
+        if (!hasAny) {
             setTimeout(() => { if (tokenModal) tokenModal.classList.add('active'); }, 800);
         }
 
-        // AI Settings button → open token modal
+        // AI Settings button → open modal and populate fields
         if (settingsBtn) {
             settingsBtn.addEventListener('click', () => {
                 if (tokenModal) {
-                    if (tokenInput) tokenInput.value = this.aiEngine.getToken();
+                    if (hfTokenInput)   hfTokenInput.value   = this.aiEngine.getToken();
+                    if (stabTokenInput) stabTokenInput.value = this.aiEngine.getStabilityToken();
                     tokenModal.classList.add('active');
                 }
             });
         }
 
-        // Save token button
+        // Save button: save both tokens (at least one must be provided)
         if (tokenSaveBtn) {
             tokenSaveBtn.addEventListener('click', () => {
-                const val = tokenInput ? tokenInput.value.trim() : '';
-                if (!val || !val.startsWith('hf_')) {
-                    tokenInput.style.borderColor = '#ef4444';
-                    tokenInput.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
-                    tokenInput.placeholder = 'Token يجب أن يبدأ بـ hf_';
-                    setTimeout(() => {
-                        tokenInput.style.borderColor = '';
-                        tokenInput.style.boxShadow = '';
-                        tokenInput.placeholder = 'hf_xxxxxxxxxxxxxxxxxxxxxxxx';
-                    }, 2000);
+                const hfVal   = hfTokenInput   ? hfTokenInput.value.trim()   : '';
+                const stabVal = stabTokenInput  ? stabTokenInput.value.trim() : '';
+
+                if (!hfVal && !stabVal) {
+                    // Highlight both inputs in red
+                    [hfTokenInput, stabTokenInput].forEach(inp => {
+                        if (!inp) return;
+                        inp.style.borderColor = '#ef4444';
+                        inp.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
+                        setTimeout(() => { inp.style.borderColor = ''; inp.style.boxShadow = ''; }, 2000);
+                    });
                     return;
                 }
-                this.aiEngine.setToken(val);
+
+                if (stabVal) this.aiEngine.setStabilityToken(stabVal);
+                if (hfVal)   this.aiEngine.setToken(hfVal);
+
                 updateStatusDot();
                 if (tokenModal) tokenModal.classList.remove('active');
             });
         }
 
-        // Skip button → close without saving
+        // Skip button
         if (tokenSkipBtn) {
             tokenSkipBtn.addEventListener('click', () => {
                 if (tokenModal) tokenModal.classList.remove('active');
             });
         }
 
-        // Close modal on backdrop click
+        // Close on backdrop click
         if (tokenModal) {
             tokenModal.addEventListener('click', (e) => {
                 if (e.target === tokenModal) tokenModal.classList.remove('active');

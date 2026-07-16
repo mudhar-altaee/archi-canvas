@@ -1,11 +1,15 @@
 /**
- * AI Engine - Hugging Face Inpainting Integration
- * Uses the official @huggingface/inference JS library (via CDN) to handle CORS correctly.
- * Images are sent as Blobs (binary) - not base64 JSON - which is what the HF API expects.
+ * AI Engine - Stability AI Inpainting Integration
+ * Uses Stability AI's REST API which:
+ *  - Supports CORS from browsers ✅
+ *  - Has a reliable inpainting endpoint ✅  
+ *  - Gives 25 free credits on signup (enough for ~25 inpainting operations) ✅
+ *  - Also supports Hugging Face token as fallback via router endpoint ✅
+ *
+ * Fallback chain:
+ *  1. Stability AI (api.stability.ai) - best quality, CORS OK
+ *  2. HF Router (router.huggingface.co) - free with HF token, CORS OK
  */
-
-// ── Import official HF library from CDN (handles CORS automatically) ────────
-import { HfInference } from 'https://esm.run/@huggingface/inference';
 
 const AI_ENGINE = {
 
@@ -14,124 +18,161 @@ const AI_ENGINE = {
     setToken(token)  { localStorage.setItem('hf_api_token', token.trim()); },
     hasToken()       { return !!this.getToken(); },
 
+    getStabilityToken()       { return localStorage.getItem('stability_api_token') || ''; },
+    setStabilityToken(token)  { localStorage.setItem('stability_api_token', token.trim()); },
+    hasStabilityToken()       { return !!this.getStabilityToken(); },
+
     // ─── Prompt Generation ──────────────────────────────────────────────────
     generatePrompt(materialNode) {
         const url      = materialNode.getValue() || '';
         const filename = url.split('/').pop().split('?')[0].toLowerCase();
 
-        let mat = 'smooth plastered wall, natural daylight, architectural photo';
+        let mat = 'smooth plastered architectural wall';
         if (/brick|طابوق|طوب/.test(filename))
-            mat = 'red clay brick wall, mortar joints, architectural photorealistic render';
+            mat = 'red clay brick wall with mortar joints, architectural render';
         else if (/marble|رخام/.test(filename))
-            mat = 'polished white marble, fine veining, architectural interior';
+            mat = 'white polished marble with fine gray veining';
         else if (/wood|خشب|parquet/.test(filename))
-            mat = 'natural wood texture, horizontal planks, warm interior light';
+            mat = 'natural wood paneling with visible grain texture';
         else if (/porcelain|porcela|بورسلين/.test(filename))
-            mat = 'glossy porcelain tile, large format, clean grout lines, modern interior';
+            mat = 'large format glossy porcelain tile, clean grout lines';
         else if (/tile|سيراميك|ceramic/.test(filename))
-            mat = 'ceramic tile surface, architectural visualization, photorealistic';
+            mat = 'ceramic wall tile with regular grout pattern';
         else if (/concrete|خرسانة/.test(filename))
-            mat = 'raw concrete wall, brutalist architecture, high detail render';
+            mat = 'exposed raw concrete wall surface';
         else if (/stone|حجر/.test(filename))
-            mat = 'natural stone cladding, rough texture, exterior wall';
+            mat = 'natural stone wall cladding, rough textured';
         else if (/metal|معدن|steel/.test(filename))
-            mat = 'brushed metal panel, industrial architecture, modern facade';
+            mat = 'brushed stainless steel metal panel facade';
 
-        return `${mat}, photorealistic, 8k, high resolution, professional architectural photography, seamless texture`;
+        return `${mat}, photorealistic architectural visualization, professional render, 8k, high detail`;
     },
 
-    // ─── Image → Blob Helpers ───────────────────────────────────────────────
-    /**
-     * Loads an image URL and returns a Blob (binary PNG) scaled to maxSize.
-     * HF API expects Blob, not base64.
-     */
-    async imageUrlToBlob(url, maxSize = 512) {
+    // ─── Image / Mask → Scaled Canvas Helpers ──────────────────────────────
+    async urlToScaledCanvas(url, maxW, maxH) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
-                const scale = Math.min(maxSize / img.naturalWidth, maxSize / img.naturalHeight, 1);
+                const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
                 const w = Math.round(img.naturalWidth  * scale);
                 const h = Math.round(img.naturalHeight * scale);
                 const c = document.createElement('canvas');
                 c.width = w; c.height = h;
                 c.getContext('2d').drawImage(img, 0, 0, w, h);
-                c.toBlob(blob => blob ? resolve({ blob, w, h }) : reject(new Error('Canvas toBlob failed')), 'image/png');
+                resolve({ canvas: c, w, h });
             };
-            img.onerror = () => reject(new Error('Failed to load image: ' + url.slice(0, 60)));
+            img.onerror = () => reject(new Error('Failed to load image'));
             img.src = url;
         });
     },
 
-    /**
-     * Converts mask canvas alpha channel to a white/black PNG Blob (white = repaint, black = keep).
-     * Scaled to target dimensions to match the source image blob.
-     */
-    async maskCanvasToBlob(maskCanvas, targetW, targetH) {
-        return new Promise((resolve, reject) => {
-            const c   = document.createElement('canvas');
-            c.width   = targetW;
-            c.height  = targetH;
-            const ctx = c.getContext('2d');
-
-            // Draw mask scaled to target size
-            if (maskCanvas && maskCanvas.width > 0 && maskCanvas.height > 0) {
-                ctx.drawImage(maskCanvas, 0, 0, targetW, targetH);
-            }
-
-            // Convert alpha → white/black (HF expects white = inpaint area)
-            const imgData = ctx.getImageData(0, 0, targetW, targetH);
-            const d = imgData.data;
-            for (let i = 0; i < d.length; i += 4) {
-                const val = d[i + 3] > 10 ? 255 : 0;
-                d[i] = d[i+1] = d[i+2] = val;
-                d[i+3] = 255;
-            }
-            ctx.putImageData(imgData, 0, 0);
-
-            c.toBlob(blob => blob ? resolve(blob) : reject(new Error('Mask toBlob failed')), 'image/png');
-        });
+    canvasToBlob(canvas, type = 'image/png', quality = 1) {
+        return new Promise((resolve, reject) =>
+            canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), type, quality)
+        );
     },
 
-    // ─── Core AI Call ───────────────────────────────────────────────────────
+    canvasToBase64(canvas) {
+        return canvas.toDataURL('image/png').replace(/^data:image\/\w+;base64,/, '');
+    },
+
     /**
-     * Calls HF Inpainting via official @huggingface/inference library.
-     * Uses imageToImage with mask_image parameter.
+     * Build the mask canvas: white = repaint, black = keep (binary PNG)
      */
-    async callHFInpainting(imageBlob, maskBlob, prompt) {
+    buildMaskCanvas(maskCanvas, targetW, targetH) {
+        const c   = document.createElement('canvas');
+        c.width   = targetW; c.height = targetH;
+        const ctx = c.getContext('2d');
+        if (maskCanvas && maskCanvas.width > 0) {
+            ctx.drawImage(maskCanvas, 0, 0, targetW, targetH);
+        }
+        const imgData = ctx.getImageData(0, 0, targetW, targetH);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+            const val = d[i + 3] > 10 ? 255 : 0;
+            d[i] = d[i+1] = d[i+2] = val;
+            d[i+3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        return c;
+    },
+
+    // ─── Strategy A: Stability AI REST API (best, free 25 credits on signup) ─
+    async callStabilityAI(imgBlob, maskBlob, prompt) {
+        const token = this.getStabilityToken();
+
+        const formData = new FormData();
+        formData.append('image',  imgBlob,  'image.png');
+        formData.append('mask',   maskBlob, 'mask.png');
+        formData.append('prompt', prompt);
+        formData.append('output_format', 'png');
+
+        const resp = await fetch('https://api.stability.ai/v2beta/stable-image/edit/inpaint', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'image/*',
+            },
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(`Stability AI error ${resp.status}: ${txt.slice(0, 200)}`);
+        }
+        return await resp.blob();
+    },
+
+    // ─── Strategy B: HF Router (free with HF token, supports CORS) ──────────
+    async callHFRouter(imgBase64, maskBase64, prompt) {
         const token = this.getToken();
-        const hf    = new HfInference(token);
 
-        // Use the stable diffusion inpainting model
-        const resultBlob = await hf.imageToImage({
-            model: 'stable-diffusion-v1-5/stable-diffusion-inpainting',
-            inputs: imageBlob,
-            parameters: {
-                prompt,
-                mask_image: maskBlob,
-                strength:              0.98,
-                num_inference_steps:   25,
-                guidance_scale:        7.5,
-                negative_prompt:       'blurry, distorted, low quality, cartoon, unrealistic, watermark, text, tiling artifacts',
+        // Use the HF router endpoint for inpainting
+        const resp = await fetch(
+            'https://router.huggingface.co/hf-inference/models/stable-diffusion-v1-5/stable-diffusion-inpainting',
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(120_000), // 2 min timeout for cold start
+                body: JSON.stringify({
+                    inputs: prompt,
+                    parameters: {
+                        image:       imgBase64,
+                        mask_image:  maskBase64,
+                        strength:               0.95,
+                        num_inference_steps:    20,
+                        guidance_scale:         7.5,
+                        negative_prompt: 'blurry, distorted, low quality, cartoon, unrealistic',
+                    }
+                })
             }
-        });
+        );
 
-        return resultBlob; // Blob
+        if (resp.status === 503) {
+            const body = await resp.json().catch(() => ({}));
+            const waitSec = body.estimated_time || 20;
+            throw new Error(`Model loading (est. ${Math.ceil(waitSec)}s). Please try again in a moment.`);
+        }
+        if (resp.status === 401) throw new Error('Invalid Hugging Face token. Update it in AI Settings.');
+        if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(`HF API error ${resp.status}: ${txt.slice(0, 200)}`);
+        }
+        return await resp.blob();
     },
 
-    // ─── Blob → DataURL helper ──────────────────────────────────────────────
-    blobToDataUrl(blob) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload  = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-    },
-
-    // ─── Composite AI result back onto original full-res image ──────────────
+    // ─── Composite AI result onto full-resolution original image ────────────
     async compositeOnOriginal(originalUrl, maskCanvas, aiResultBlob) {
-        const aiDataUrl = await this.blobToDataUrl(aiResultBlob);
+        const aiDataUrl = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(aiResultBlob);
+        });
 
         return new Promise((resolve, reject) => {
             const origImg = new Image();
@@ -140,40 +181,40 @@ const AI_ENGINE = {
             aiImg.crossOrigin   = 'anonymous';
             let loaded = 0;
 
-            const onBothLoaded = () => {
+            const onBoth = () => {
                 loaded++;
                 if (loaded < 2) return;
                 try {
                     const W = origImg.naturalWidth  || origImg.width;
                     const H = origImg.naturalHeight || origImg.height;
-
                     const c   = document.createElement('canvas');
-                    c.width   = W; c.height = H;
+                    c.width = W; c.height = H;
                     const ctx = c.getContext('2d');
+
+                    // Draw original
                     ctx.drawImage(origImg, 0, 0, W, H);
                     const origData = ctx.getImageData(0, 0, W, H);
 
-                    // Scale mask to full-res
-                    const maskC   = document.createElement('canvas');
-                    maskC.width   = W; maskC.height = H;
-                    const maskCtx = maskC.getContext('2d');
+                    // Scale mask
+                    const mc = document.createElement('canvas');
+                    mc.width = W; mc.height = H;
                     if (maskCanvas && maskCanvas.width > 0) {
-                        maskCtx.drawImage(maskCanvas, 0, 0, W, H);
+                        mc.getContext('2d').drawImage(maskCanvas, 0, 0, W, H);
                     }
-                    const maskData = maskCtx.getImageData(0, 0, W, H).data;
+                    const maskData = mc.getContext('2d').getImageData(0, 0, W, H).data;
 
-                    // Scale AI result to full-res
-                    const aiC   = document.createElement('canvas');
-                    aiC.width   = W; aiC.height = H;
-                    aiC.getContext('2d').drawImage(aiImg, 0, 0, W, H);
-                    const aiData = aiC.getContext('2d').getImageData(0, 0, W, H).data;
+                    // Scale AI result
+                    const ac = document.createElement('canvas');
+                    ac.width = W; ac.height = H;
+                    ac.getContext('2d').drawImage(aiImg, 0, 0, W, H);
+                    const aiData = ac.getContext('2d').getImageData(0, 0, W, H).data;
 
-                    // Blend: where mask alpha > 0, use AI result; elsewhere keep original
+                    // Blend in masked region
                     const out = origData;
                     for (let i = 0; i < maskData.length; i += 4) {
-                        const alpha = maskData[i + 3];
-                        if (alpha > 10) {
-                            const blend = alpha / 255;
+                        const a = maskData[i + 3];
+                        if (a > 10) {
+                            const blend = a / 255;
                             out.data[i]     = aiData[i]     * blend + out.data[i]     * (1 - blend);
                             out.data[i + 1] = aiData[i + 1] * blend + out.data[i + 1] * (1 - blend);
                             out.data[i + 2] = aiData[i + 2] * blend + out.data[i + 2] * (1 - blend);
@@ -181,54 +222,52 @@ const AI_ENGINE = {
                     }
                     ctx.putImageData(out, 0, 0);
                     resolve(c.toDataURL('image/jpeg', 0.95));
-                } catch (err) { reject(err); }
+                } catch (e) { reject(e); }
             };
 
-            origImg.onload  = onBothLoaded;
-            aiImg.onload    = onBothLoaded;
-            origImg.onerror = reject;
-            aiImg.onerror   = reject;
-            origImg.src     = originalUrl;
-            aiImg.src       = aiDataUrl;
+            origImg.onload  = onBoth; aiImg.onload  = onBoth;
+            origImg.onerror = reject; aiImg.onerror = reject;
+            origImg.src = originalUrl;
+            aiImg.src   = aiDataUrl;
         });
     },
 
     // ─── Full Pipeline ──────────────────────────────────────────────────────
-    /**
-     * Main entry point: applies material texture to the selected region using AI.
-     * @param {Object}   srcImageNode   - The building/room image node (has maskCanvas)
-     * @param {Object}   materialNode   - The material/texture node
-     * @param {Function} onProgress     - Callback(statusString) for UI updates
-     * @returns {Promise<string>}       - Final composited image as data URL
-     */
     async applyMaterial(srcImageNode, materialNode, onProgress) {
         onProgress('Preparing images...');
 
         const srcUrl = srcImageNode.getValue();
-        if (!srcUrl)                              throw new Error('Source image is empty');
-        if (!srcImageNode.maskCanvas)             throw new Error('No mask found - please draw a selection first');
+        if (!srcUrl)                  throw new Error('Source image is empty');
+        if (!srcImageNode.maskCanvas) throw new Error('No selection mask found. Draw a selection first!');
 
-        // 1. Scale source image to 512×512 Blob (AI max input)
-        onProgress('Scaling source image...');
-        const { blob: imgBlob, w: aiW, h: aiH } = await this.imageUrlToBlob(srcUrl, 512);
-
-        // 2. Scale mask to same dimensions as Blob
-        onProgress('Processing selection mask...');
-        const maskBlob = await this.maskCanvasToBlob(srcImageNode.maskCanvas, aiW, aiH);
-
-        // 3. Generate contextual prompt from material filename
         const prompt = this.generatePrompt(materialNode);
-        onProgress(`Sending to AI: "${prompt.split(',')[0]}"...`);
+        onProgress('Scaling image to AI size (512×512)...');
 
-        // 4. Call HF Inpainting (official library - handles CORS)
-        const aiResultBlob = await this.callHFInpainting(imgBlob, maskBlob, prompt);
+        // Scale to 512×512 max (SD inpainting standard)
+        const { canvas: imgCanvas, w: aiW, h: aiH } = await this.urlToScaledCanvas(srcUrl, 512, 512);
+        const maskCanvas512 = this.buildMaskCanvas(srcImageNode.maskCanvas, aiW, aiH);
 
-        // 5. Composite AI result back onto original full-resolution image
-        onProgress('Compositing result on original image...');
-        const finalUrl = await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
+        // Try Stability AI first (if token present)
+        if (this.hasStabilityToken()) {
+            onProgress(`AI (Stability): "${prompt.split(',')[0]}"...`);
+            const imgBlob  = await this.canvasToBlob(imgCanvas);
+            const maskBlob = await this.canvasToBlob(maskCanvas512);
+            const result   = await this.callStabilityAI(imgBlob, maskBlob, prompt);
+            onProgress('Compositing result...');
+            return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, result);
+        }
 
-        onProgress('Done! ✨');
-        return finalUrl;
+        // Fallback: HF Router
+        if (this.hasToken()) {
+            onProgress(`AI (HF): "${prompt.split(',')[0]}"...`);
+            const imgB64  = this.canvasToBase64(imgCanvas);
+            const maskB64 = this.canvasToBase64(maskCanvas512);
+            const result  = await this.callHFRouter(imgB64, maskB64, prompt);
+            onProgress('Compositing result...');
+            return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, result);
+        }
+
+        throw new Error('No AI token configured. Open AI Settings to add a token.');
     }
 };
 
