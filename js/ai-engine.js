@@ -149,39 +149,46 @@ const AI_ENGINE = {
         const filename = url.split('/').pop().split('?')[0].toLowerCase();
         const color    = await this.analyzeMaterialColor(materialNode);
 
-        let matType = 'smooth wall surface';
-        let extras  = '';
+        let matType = 'smooth painted wall surface';
+        let extras  = 'matte finish, realistic rendering';
 
         if (/brick|طابوق|طوب/.test(filename)) {
-            matType = 'brick wall';
-            extras  = 'visible individual bricks, regular mortar joints, textured surface';
+            matType = 'brick facade';
+            extras  = 'individual visible bricks with mortar joints, realistic brick coursing following wall perspective, natural texture variation, depth and shadow between bricks';
         } else if (/marble|رخام/.test(filename)) {
-            matType = 'marble wall';
-            extras  = 'polished surface, natural stone veining, reflective finish';
+            matType = 'marble cladding facade';
+            extras  = 'natural stone veining, polished reflective surface, seamless stone panels';
         } else if (/wood|خشب|parquet/.test(filename)) {
-            matType = 'wood cladding wall';
-            extras  = 'natural wood grain, horizontal planks, warm texture';
+            matType = 'wood cladding facade';
+            extras  = 'natural wood grain following wall perspective, horizontal planks with realistic shadow lines';
         } else if (/porcelain|porcela|بورسلين/.test(filename)) {
-            matType = 'large-format porcelain tile wall';
-            extras  = 'glossy smooth surface, thin grout lines, modern finish';
+            matType = 'large-format porcelain tile facade';
+            extras  = 'glossy smooth tiles, thin grout lines in perspective, modern clean finish';
         } else if (/tile|سيراميك|ceramic/.test(filename)) {
-            matType = 'ceramic tile wall';
-            extras  = 'regular tile grid pattern, grout lines visible';
+            matType = 'ceramic tile facade';
+            extras  = 'regular tile grid in perspective, thin visible grout joints';
         } else if (/concrete|خرسانة/.test(filename)) {
-            matType = 'raw concrete wall';
-            extras  = 'rough texture, exposed aggregate, brutalist finish';
+            matType = 'exposed concrete facade';
+            extras  = 'raw concrete texture, board-form marks, brutalist finish';
         } else if (/stone|حجر/.test(filename)) {
-            matType = 'natural stone wall';
-            extras  = 'rough irregular stone blocks, rustic appearance';
+            matType = 'natural stone cladding facade';
+            extras  = 'irregular stone blocks, rustic mortar, natural variation in color';
         } else if (/metal|معدن|steel/.test(filename)) {
-            matType = 'metal panel wall';
-            extras  = 'industrial finish, brushed surface, modern facade';
+            matType = 'metal panel facade';
+            extras  = 'brushed metal finish, panel joints in perspective, modern industrial look';
         } else if (/plaster|جبس/.test(filename)) {
-            matType = 'smooth plastered wall';
-            extras  = 'clean flat surface, matte finish';
+            matType = 'smooth plastered facade';
+            extras  = 'clean matte finish, subtle surface texture';
         }
 
-        return `architectural visualization, building facade with ${color} ${matType}, ${extras}, photorealistic render, high quality, 8k resolution, professional architecture photography, dramatic lighting, the entire masked area is covered with this material`;
+        return (
+            `architectural exterior visualization, realistic photo, ` +
+            `${color} ${matType} applied to the building wall, ` +
+            `${extras}, ` +
+            `perfectly matching surrounding building perspective, lighting, and shadows, ` +
+            `photorealistic, 4k, professional architecture photography, ` +
+            `only the masked wall area is replaced, all other parts unchanged`
+        );
     },
 
     // ─── STEP 1: Perspective-Correct Tiling ──────────────────────────────────
@@ -381,31 +388,31 @@ const AI_ENGINE = {
         return c;
     },
 
-    // ─── Strategy: Fal.ai Inpainting (SDXL Fast / FLUX.1 Fill queue) ────────
-    async callFalInpainting(imageDataUrl, maskDataUrl, prompt, strength, onProgress) {
+    // ─── Strategy: FLUX.1 Fill (fal-ai/flux/fill) ────────────────────────────
+    async callFalInpainting(imageDataUrl, maskDataUrl, prompt, _strength, onProgress) {
         const token = this.getFalToken();
         if (!token) throw new Error('No Fal.ai token configured.');
 
-        const submitResp = await fetch('https://queue.fal.run/fal-ai/fast-sdxl/inpainting', {
+        // FLUX.1 Fill: send image + mask, model auto-handles perspective & lighting
+        const submitResp = await fetch('https://queue.fal.run/fal-ai/flux/fill', {
             method: 'POST',
             headers: {
                 'Authorization': `Key ${token}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                image_url: imageDataUrl,
-                mask_url: maskDataUrl,
-                prompt: prompt,
-                negative_prompt: 'blurry, low quality, deformed, flat texture, watermark, text',
-                strength: strength,       // Dynamic based on whether pins are used
+                image_url:          imageDataUrl,
+                mask_url:           maskDataUrl,
+                prompt:             prompt,
                 num_inference_steps: 28,
-                guidance_scale: 7.5
+                guidance_scale:     30,
+                output_format:      'jpeg'
             })
         });
 
         if (!submitResp.ok) {
             const txt = await submitResp.text();
-            throw new Error(`Fal.ai failed (${submitResp.status}): ${txt.slice(0, 200)}`);
+            throw new Error(`Fal.ai failed (${submitResp.status}): ${txt.slice(0, 300)}`);
         }
 
         const submitResult = await submitResp.json();
@@ -413,7 +420,7 @@ const AI_ENGINE = {
         if (!requestId) throw new Error('Fal.ai queue did not return a request ID.');
 
         // Use the official status_url returned directly by the API
-        const statusUrl = submitResult.status_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}/status`;
+        const statusUrl = submitResult.status_url || `https://queue.fal.run/fal-ai/flux/fill/requests/${requestId}/status`;
         
         for (let i = 0; i < 120; i++) { // Max 120 seconds for cold start
             await new Promise(res => setTimeout(res, 1000));
@@ -427,41 +434,36 @@ const AI_ENGINE = {
             }
 
             const rawTxt = await pollResp.text();
-            if (!rawTxt) {
-                // Empty response, wait for next cycle
-                continue;
-            }
+            if (!rawTxt) continue;
 
             const pollResult = JSON.parse(rawTxt);
             
-            // Show real-time queue position or progress to user
             if (pollResult.status === 'IN_QUEUE') {
                 const pos = pollResult.queue_position !== undefined ? ` (الترتيب: ${pollResult.queue_position})` : '';
-                onProgress(`في طابور الانتظار${pos}...`);
+                onProgress(`🧠 FLUX.1 Fill - في طابور الانتظار${pos}...`);
             } else if (pollResult.status === 'IN_PROGRESS') {
-                onProgress('جاري معالجة وتوليد الماتريال مع المنظور...');
+                onProgress('🧠 FLUX.1 Fill - جاري توليد الخامة مع المنظور...');
             }
 
             if (pollResult.status === 'COMPLETED') {
-                // Fetch the response payload from response_url
-                const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
+                const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/flux/fill/requests/${requestId}`;
                 const resultResp = await fetch(responseUrl, {
                     headers: { 'Authorization': `Key ${token}` }
                 });
-                if (!resultResp.ok) throw new Error('Failed to retrieve Fal.ai output payload.');
+                if (!resultResp.ok) throw new Error('Failed to retrieve FLUX.1 Fill output.');
 
                 const resultData = await resultResp.json();
                 const imgUrl = resultData.images?.[0]?.url;
-                if (!imgUrl) throw new Error('Fal.ai output payload did not contain any images.');
+                if (!imgUrl) throw new Error('FLUX.1 Fill output did not contain any images.');
 
                 const imgResp = await fetch(imgUrl);
                 return await imgResp.blob();
             }
             if (pollResult.status === 'FAILED') {
-                throw new Error('Fal.ai queue task failed: ' + JSON.stringify(pollResult.error || 'Unknown error'));
+                throw new Error('FLUX.1 Fill task failed: ' + JSON.stringify(pollResult.error || 'Unknown'));
             }
         }
-        throw new Error('Fal.ai request timed out (120s).');
+        throw new Error('FLUX.1 Fill request timed out (120s).');
     },
 
     // ─── Composite result onto full-resolution original ───────────────────────
@@ -554,27 +556,31 @@ const AI_ENGINE = {
             srcImg, texImg, srcImageNode, materialNode, aiW, aiH
         );
 
-        // 2. AI Enhancement via Fal.ai
+        // 2. FLUX.1 Fill: send original building image + mask + prompt
+        // Model reads 3D geometry from original image and applies texture intelligently
         if (this.hasFalToken()) {
-            onProgress('🧠 AI (Fal.ai): rendering realistic lighting, shadows, and perspective...');
-            const preTexturedDataUrl = classicCanvas.toDataURL('image/jpeg', 0.90);
-            const maskCanvas64       = this.buildBinaryMask(srcImageNode.maskCanvas, aiW, aiH);
-            const maskDataUrl        = maskCanvas64.toDataURL('image/png');
-            
-            const hasPins = (srcImageNode.perspectivePlanes && srcImageNode.perspectivePlanes.length > 0) || 
-                            (srcImageNode.perspectiveQuad && srcImageNode.perspectiveQuad.length > 0);
-            // 0.30 if hand-warped by pins; 0.95 if no pins (gives AI freedom to project onto walls automatically)
-            const strength = hasPins ? 0.30 : 0.95;
+            onProgress('🧠 FLUX.1 Fill: sending image + mask to AI...');
+
+            // Resize original image to the same AI dimensions
+            const origCanvas = document.createElement('canvas');
+            origCanvas.width  = aiW;
+            origCanvas.height = aiH;
+            const origCtx = origCanvas.getContext('2d');
+            origCtx.drawImage(srcImg, 0, 0, aiW, aiH);
+            const origImageDataUrl = origCanvas.toDataURL('image/jpeg', 0.92);
+
+            const maskCanvas64 = this.buildBinaryMask(srcImageNode.maskCanvas, aiW, aiH);
+            const maskDataUrl  = maskCanvas64.toDataURL('image/png');
 
             try {
                 const prompt = await this.generatePrompt(materialNode);
-                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt, strength, onProgress);
+                const aiResultBlob = await this.callFalInpainting(origImageDataUrl, maskDataUrl, prompt, 1.0, onProgress);
                 onProgress('Compositing final result...');
                 return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
             } catch (err) {
-                console.warn('Fal.ai failed, falling back to classic:', err.message);
-                alert(`AI Error (Fal.ai): ${err.message}\n\nسيتراجع البرنامج الآن للوضع الكلاسيكي.`);
-                onProgress('Fal.ai failed – returning classic texture result...');
+                console.warn('FLUX.1 Fill failed, falling back to classic:', err.message);
+                alert(`AI Error (FLUX.1 Fill): ${err.message}\n\nسيتراجع البرنامج الآن للوضع الكلاسيكي.`);
+                onProgress('FLUX.1 Fill failed – using classic composite...');
             }
         }
 
