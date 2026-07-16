@@ -419,7 +419,19 @@ const AI_ENGINE = {
             const pollResp = await fetch(statusUrl, {
                 headers: { 'Authorization': `Key ${token}` }
             });
-            const pollResult = await pollResp.json();
+
+            if (!pollResp.ok) {
+                const errTxt = await pollResp.text().catch(() => '');
+                throw new Error(`فشل استعلام حالة الطابور (كود: ${pollResp.status}): ${errTxt || 'بدون تفاصيل'}`);
+            }
+
+            const rawTxt = await pollResp.text();
+            if (!rawTxt) {
+                // Empty response, wait for next cycle
+                continue;
+            }
+
+            const pollResult = JSON.parse(rawTxt);
             
             // Show real-time queue position or progress to user
             if (pollResult.status === 'IN_QUEUE') {
