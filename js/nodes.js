@@ -94,6 +94,19 @@ export class Node {
                         <div class="handle-btn btn-sel-lasso" title="Polygonal Lasso Tool">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><polygon points="12 2 22 8.5 22 19.5 12 22 2 19.5 2 8.5"/></svg>
                         </div>
+                        <div class="handle-btn btn-sel-perspective" title="Perspective Plane (XYZ)">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 20 9 4 21 4 15 20"/></svg>
+                        </div>
+                        
+                        <div class="perspective-actions-group" style="display: none; flex-direction: column; gap: 4px; border-top: 1px solid rgba(0, 136, 204, 0.2); padding-top: 4px; margin-top: 2px; width: 100%; align-items: center;">
+                            <div class="handle-btn btn-add-plane" title="Add Surface (Crease/Column side) (+)" style="color: #10b981;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            </div>
+                            <div class="handle-btn btn-del-plane" title="Delete Active Surface (-)" style="color: #ef4444;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            </div>
+                        </div>
+                        
                         <div style="width: 16px; height: 1px; background: rgba(0, 136, 204, 0.2); margin: 2px 0;"></div>
                         
                         <div class="handle-btn btn-sel-mode-add active" title="Add to Selection (+)" style="font-weight: bold;">
@@ -2524,83 +2537,84 @@ export class MaterialNode extends Node {
                     
                     const mWidth = xMax - xMin;
                     const mHeight = yMax - yMin;
-                    const isVerticalStructure = mHeight > mWidth * 1.2;
+                    const scaleX = canvas.width / srcImageNode.width;
+                    const scaleY = canvas.height / srcImageNode.height;
                     
-                    // 2. Scan for a strong vertical crease/corner inside vertical structures
-                    let cornerX = -1;
-                    let maxEdgeSum = 0;
+                    const texCorners = [
+                        { x: 0, y: 0 },
+                        { x: texW, y: 0 },
+                        { x: texW, y: texH },
+                        { x: 0, y: texH }
+                    ];
                     
-                    if (isVerticalStructure && mWidth > 15) {
-                        const scanStart = Math.floor(xMin + mWidth * 0.15);
-                        const scanEnd = Math.floor(xMax - mWidth * 0.15);
-                        
-                        for (let x = scanStart; x < scanEnd; x++) {
-                            let edgeSum = 0;
-                            let activeCount = 0;
-                            
-                            for (let y = yMin; y < yMax; y += 2) { // step by 2 for performance
-                                const maskIdx = (y * canvasW + x) * 4;
-                                if (maskPixels[maskIdx + 3] > 10) {
-                                    const idx = (y * canvasW + x) * 4;
-                                    const idxL = idx - 8; // 2 pixels left
-                                    const idxR = idx + 8; // 2 pixels right
-                                    
-                                    if (idxL >= 0 && idxR < pixels.length) {
-                                        const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
-                                        const lumL = 0.299 * pixels[idxL] + 0.587 * pixels[idxL+1] + 0.114 * pixels[idxL+2];
-                                        const lumR = 0.299 * pixels[idxR] + 0.587 * pixels[idxR+1] + 0.114 * pixels[idxR+2];
-                                        edgeSum += Math.abs(lumR - lumL);
-                                        activeCount++;
-                                    }
-                                }
+                    const solveHomography = (src, dst) => {
+                        const A = [];
+                        const B = [];
+                        for (let i = 0; i < 4; i++) {
+                            const x = src[i].x;
+                            const y = src[i].y;
+                            const u = dst[i].x;
+                            const v = dst[i].y;
+                            A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]);
+                            B.push(u);
+                            A.push([0, 0, 0, x, y, 1, -x * v, -y * v]);
+                            B.push(v);
+                        }
+                        const n = 8;
+                        for (let i = 0; i < n; i++) {
+                            let maxRow = i;
+                            for (let k = i + 1; k < n; k++) {
+                                if (Math.abs(A[k][i]) > Math.abs(A[maxRow][i])) maxRow = k;
                             }
-                            
-                            if (activeCount > (yMax - yMin) * 0.15) {
-                                const avgEdge = edgeSum / activeCount;
-                                if (avgEdge > maxEdgeSum) {
-                                    maxEdgeSum = avgEdge;
-                                    cornerX = x;
-                                }
+                            const tempA = A[i]; A[i] = A[maxRow]; A[maxRow] = tempA;
+                            const tempB = B[i]; B[i] = B[maxRow]; B[maxRow] = tempB;
+                            for (let k = i + 1; k < n; k++) {
+                                const factor = A[k][i] / A[i][i];
+                                B[k] -= factor * B[i];
+                                for (let j = i; j < n; j++) A[k][j] -= factor * A[i][j];
                             }
                         }
-                    }
-                    
-                    // We have a corner/crease if maxEdgeSum is above a threshold
-                    const hasVerticalCorner = maxEdgeSum > 14 && cornerX !== -1;
-                    
-                    // 3. Scan for dominant architectural lines slope to auto-align texture perspective
-                    const getLum = (px, py) => {
-                        const idx = (py * canvasW + px) * 4;
-                        if (idx < 0 || idx >= pixels.length) return 128;
-                        return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
+                        const C = new Array(8);
+                        for (let i = n - 1; i >= 0; i--) {
+                            let sum = 0;
+                            for (let j = i + 1; j < n; j++) sum += A[i][j] * C[j];
+                            C[i] = (B[i] - sum) / A[i][i];
+                        }
+                        return C;
                     };
                     
-                    let sumSlope = 0;
-                    let weightSum = 0;
-                    
-                    for (let y = yMin + 2; y < yMax - 2; y += 4) {
-                        for (let x = xMin + 2; x < xMax - 2; x += 4) {
-                            const maskIdx = (y * canvasW + x) * 4;
-                            if (maskIdx >= 0 && maskIdx < maskPixels.length && maskPixels[maskIdx + 3] > 30) {
-                                const gx = getLum(x + 1, y) - getLum(x - 1, y);
-                                const gy = getLum(x, y + 1) - getLum(x, y - 1);
-                                const mag = Math.sqrt(gx * gx + gy * gy);
-                                if (mag > 15) {
-                                    const angle = Math.atan2(gy, gx);
-                                    const absAngle = Math.abs(angle);
-                                    if (absAngle > Math.PI / 6 && absAngle < 5 * Math.PI / 6) {
-                                        const slope = -gx / (gy || 1);
-                                        if (Math.abs(slope) < 0.6) {
-                                            sumSlope += slope * mag;
-                                            weightSum += mag;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    // Setup multiple perspective planes and solve homography for each
+                    let planes = [];
+                    if (srcImageNode.perspectivePlanes && srcImageNode.perspectivePlanes.length > 0) {
+                        planes = srcImageNode.perspectivePlanes.map(plane => {
+                            const scaledPoints = plane.points.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }));
+                            const C = solveHomography(scaledPoints, texCorners);
+                            return {
+                                points: scaledPoints,
+                                C: C
+                            };
+                        });
+                    } else if (srcImageNode.perspectiveQuad) {
+                        const scaledPoints = srcImageNode.perspectiveQuad.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }));
+                        planes = [{
+                            points: scaledPoints,
+                            C: solveHomography(scaledPoints, texCorners)
+                        }];
                     }
                     
-                    const dominantSlope = weightSum > 0 ? (sumSlope / weightSum) : 0;
+                    const isPointInQuad = (pt, quad) => {
+                        const px = pt.x, py = pt.y;
+                        let inside = false;
+                        for (let i = 0, j = 3; i < 4; j = i++) {
+                            const xi = quad[i].x, yi = quad[i].y;
+                            const xj = quad[j].x, yj = quad[j].y;
+                            const intersect = ((yi > py) !== (yj > py))
+                                && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                            if (intersect) inside = !inside;
+                        }
+                        return inside;
+                    };
+                    
                     const tScale = this.textureScale || 1.0;
                     
                     for (let i = 0; i < pixels.length; i += 4) {
@@ -2615,55 +2629,63 @@ export class MaterialNode extends Node {
                             const x = pixelIndex % canvasW;
                             const y = Math.floor(pixelIndex / canvasW);
                             
-                            let tu = 0;
-                            let tv = mWidth > 0 ? ((y - yMin) / mWidth) * (texW / texH) : 0;
+                            let sTu = 0;
+                            let sTv = 0;
                             
-                            // Shear texture horizontally based on dominant slope of the architecture
-                            if (Math.abs(dominantSlope) > 0.015) {
-                                const xCenter = (xMin + xMax) / 2;
-                                tv += ((x - xCenter) / mWidth) * dominantSlope * (texW / texH);
-                            }
-                            
-                            const pMode = this.projectionMode || 'auto';
-                            const t = mWidth > 0 ? (x - xMin) / mWidth : 0.5;
-                            
-                            if (pMode === 'flat') {
-                                tu = t;
-                            } else if (pMode === 'curved') {
-                                const theta = Math.max(-0.98, Math.min(0.98, t * 2 - 1));
-                                tu = (Math.asin(theta) / (Math.PI / 2) + 1) / 2;
-                            } else if (pMode === 'slanted-left') {
-                                tu = Math.pow(t, 1.45);
-                            } else if (pMode === 'slanted-right') {
-                                tu = 1 - Math.pow(1 - t, 1.45);
+                            // 1. If we have manual perspective planes (pins), use them! (Guarantees perfect CAD perspective alignment)
+                            if (planes.length > 0) {
+                                let chosenPlane = null;
+                                for (const plane of planes) {
+                                    if (isPointInQuad({ x, y }, plane.points)) {
+                                        chosenPlane = plane;
+                                        break;
+                                    }
+                                }
+                                // Fallback: if not inside any plane, find the one with closest center
+                                if (!chosenPlane) {
+                                    let minD = Infinity;
+                                    for (const plane of planes) {
+                                        const cx = (plane.points[0].x + plane.points[1].x + plane.points[2].x + plane.points[3].x) / 4;
+                                        const cy = (plane.points[0].y + plane.points[1].y + plane.points[2].y + plane.points[3].y) / 4;
+                                        const d = Math.hypot(x - cx, y - cy);
+                                        if (d < minD) {
+                                            minD = d;
+                                            chosenPlane = plane;
+                                        }
+                                    }
+                                }
+                                
+                                const C = chosenPlane.C;
+                                const denom = C[6] * x + C[7] * y + 1;
+                                const tu = Math.abs(denom) > 1e-5 ? ((C[0] * x + C[1] * y + C[2]) / denom) : x;
+                                const tv = Math.abs(denom) > 1e-5 ? ((C[3] * x + C[4] * y + C[5]) / denom) : y;
+                                
+                                sTu = tu * tScale;
+                                sTv = tv * tScale;
                             } else {
-                                // Default/Auto mode
-                                if (Math.abs(dominantSlope) > 0.035) {
-                                    // Auto-align perspective squeeze based on detected slope
-                                    if (dominantSlope > 0) {
-                                        tu = 1 - Math.pow(1 - t, 1.4);
-                                    } else {
-                                        tu = Math.pow(t, 1.4);
-                                    }
-                                } else if (hasVerticalCorner) {
-                                    if (x < cornerX) {
-                                        const sideT = (x - xMin) / (cornerX - xMin);
-                                        tu = Math.pow(sideT, 1.35) * 0.5;
-                                    } else {
-                                        const sideT = (x - cornerX) / (xMax - cornerX);
-                                        tu = 0.5 + (1 - Math.pow(1 - sideT, 1.35)) * 0.5;
-                                    }
-                                } else if (isVerticalStructure) {
+                                // 2. If no pins are used, apply clean, flat mapping with optional manual directional warp
+                                const pMode = this.projectionMode || 'auto';
+                                const t = mWidth > 0 ? (x - xMin) / mWidth : 0.5;
+                                
+                                let tu = t;
+                                let tv = mWidth > 0 ? ((y - yMin) / mWidth) * (texW / texH) : 0;
+                                
+                                if (pMode === 'curved') {
                                     const theta = Math.max(-0.98, Math.min(0.98, t * 2 - 1));
                                     tu = (Math.asin(theta) / (Math.PI / 2) + 1) / 2;
-                                } else {
-                                    tu = t;
+                                } else if (pMode === 'slanted-left') {
+                                    tu = Math.pow(t, 1.45);
+                                    // Soft perspective slant for slanted left
+                                    tv += ((x - (xMin + xMax)/2) / mWidth) * -0.1 * (texW / texH);
+                                } else if (pMode === 'slanted-right') {
+                                    tu = 1 - Math.pow(1 - t, 1.45);
+                                    // Soft perspective slant for slanted right
+                                    tv += ((x - (xMin + xMax)/2) / mWidth) * 0.1 * (texW / texH);
                                 }
+                                
+                                sTu = tu * texW * tScale;
+                                sTv = tv * texH * tScale;
                             }
-                            
-                            // Map normalized (tu, tv) coordinates to texture dimensions
-                            const sTu = tu * texW * tScale;
-                            const sTv = tv * texH * tScale;
                             
                             let tx = Math.floor(sTu) % texW;
                             let ty = Math.floor(sTv) % texH;
