@@ -382,7 +382,7 @@ const AI_ENGINE = {
     },
 
     // ─── Strategy: Fal.ai Inpainting (SDXL Fast / FLUX.1 Fill queue) ────────
-    async callFalInpainting(imageDataUrl, maskDataUrl, prompt, onProgress) {
+    async callFalInpainting(imageDataUrl, maskDataUrl, prompt, strength, onProgress) {
         const token = this.getFalToken();
         if (!token) throw new Error('No Fal.ai token configured.');
 
@@ -397,7 +397,7 @@ const AI_ENGINE = {
                 mask_url: maskDataUrl,
                 prompt: prompt,
                 negative_prompt: 'blurry, low quality, deformed, flat texture, watermark, text',
-                strength: 0.30,           // Keeps pre-warped texture pattern intact
+                strength: strength,       // Dynamic based on whether pins are used
                 num_inference_steps: 28,
                 guidance_scale: 7.5
             })
@@ -561,9 +561,14 @@ const AI_ENGINE = {
             const maskCanvas64       = this.buildBinaryMask(srcImageNode.maskCanvas, aiW, aiH);
             const maskDataUrl        = maskCanvas64.toDataURL('image/png');
             
+            const hasPins = (srcImageNode.perspectivePlanes && srcImageNode.perspectivePlanes.length > 0) || 
+                            (srcImageNode.perspectiveQuad && srcImageNode.perspectiveQuad.length > 0);
+            // 0.30 if hand-warped by pins; 0.80 if no pins (gives AI freedom to project onto walls automatically)
+            const strength = hasPins ? 0.30 : 0.80;
+
             try {
                 const prompt = await this.generatePrompt(materialNode);
-                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt, onProgress);
+                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt, strength, onProgress);
                 onProgress('Compositing final result...');
                 return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
             } catch (err) {
