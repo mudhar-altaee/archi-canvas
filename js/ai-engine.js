@@ -1,206 +1,141 @@
 /**
  * AI Engine - Hugging Face Inpainting Integration
- * Applies materials to architectural surfaces using AI (like Vectary Canvas)
- * Model: stable-diffusion-v1-5/stable-diffusion-inpainting
+ * Uses the official @huggingface/inference JS library (via CDN) to handle CORS correctly.
+ * Images are sent as Blobs (binary) - not base64 JSON - which is what the HF API expects.
  */
+
+// ── Import official HF library from CDN (handles CORS automatically) ────────
+import { HfInference } from 'https://esm.run/@huggingface/inference';
 
 const AI_ENGINE = {
 
-    // ─── Token Management ────────────────────────────────────────────────
-    getToken() {
-        return localStorage.getItem('hf_api_token') || '';
-    },
+    // ─── Token Management ───────────────────────────────────────────────────
+    getToken()       { return localStorage.getItem('hf_api_token') || ''; },
+    setToken(token)  { localStorage.setItem('hf_api_token', token.trim()); },
+    hasToken()       { return !!this.getToken(); },
 
-    setToken(token) {
-        localStorage.setItem('hf_api_token', token.trim());
-    },
-
-    hasToken() {
-        return !!this.getToken();
-    },
-
-    // ─── Prompt Generation ───────────────────────────────────────────────
-    /**
-     * Generates an AI prompt from the material node's image filename and dominant color
-     */
-    generatePrompt(materialNode, srcImageNode) {
-        const url = materialNode.getValue() || '';
+    // ─── Prompt Generation ──────────────────────────────────────────────────
+    generatePrompt(materialNode) {
+        const url      = materialNode.getValue() || '';
         const filename = url.split('/').pop().split('?')[0].toLowerCase();
 
-        // Detect material type from filename
-        let materialType = 'architectural surface texture';
-        if (/brick|طابوق|طوب/.test(filename))          materialType = 'brick wall texture, red clay bricks with mortar joints';
-        else if (/marble|رخام/.test(filename))          materialType = 'polished marble stone texture, veined surface';
-        else if (/wood|خشب|parquet/.test(filename))    materialType = 'wood texture, natural grain pattern';
-        else if (/porcelain|porcela|بورسلين/.test(filename)) materialType = 'porcelain tile texture, glossy smooth surface';
-        else if (/tile|سيراميك|ceramic/.test(filename)) materialType = 'ceramic tile texture, clean grout lines';
-        else if (/concrete|خرسانة/.test(filename))     materialType = 'raw concrete surface texture';
-        else if (/stone|حجر/.test(filename))           materialType = 'natural stone cladding texture';
-        else if (/metal|معدن|steel/.test(filename))    materialType = 'metal panel texture, industrial finish';
-        else if (/plaster|جبس/.test(filename))         materialType = 'smooth plaster wall texture';
+        let mat = 'smooth plastered wall, natural daylight, architectural photo';
+        if (/brick|طابوق|طوب/.test(filename))
+            mat = 'red clay brick wall, mortar joints, architectural photorealistic render';
+        else if (/marble|رخام/.test(filename))
+            mat = 'polished white marble, fine veining, architectural interior';
+        else if (/wood|خشب|parquet/.test(filename))
+            mat = 'natural wood texture, horizontal planks, warm interior light';
+        else if (/porcelain|porcela|بورسلين/.test(filename))
+            mat = 'glossy porcelain tile, large format, clean grout lines, modern interior';
+        else if (/tile|سيراميك|ceramic/.test(filename))
+            mat = 'ceramic tile surface, architectural visualization, photorealistic';
+        else if (/concrete|خرسانة/.test(filename))
+            mat = 'raw concrete wall, brutalist architecture, high detail render';
+        else if (/stone|حجر/.test(filename))
+            mat = 'natural stone cladding, rough texture, exterior wall';
+        else if (/metal|معدن|steel/.test(filename))
+            mat = 'brushed metal panel, industrial architecture, modern facade';
 
-        return `${materialType}, architectural visualization, photorealistic render, seamless pattern, professional interior photography, high quality, detailed, 8k`;
+        return `${mat}, photorealistic, 8k, high resolution, professional architectural photography, seamless texture`;
     },
 
-    // ─── Image → Base64 Helpers ──────────────────────────────────────────
+    // ─── Image → Blob Helpers ───────────────────────────────────────────────
     /**
-     * Converts an image node's URL to a scaled base64 PNG (max 512×512 for API efficiency)
+     * Loads an image URL and returns a Blob (binary PNG) scaled to maxSize.
+     * HF API expects Blob, not base64.
      */
-    async imageUrlToBase64(url, maxSize = 512) {
+    async imageUrlToBlob(url, maxSize = 512) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
                 const scale = Math.min(maxSize / img.naturalWidth, maxSize / img.naturalHeight, 1);
-                const w = Math.round(img.naturalWidth * scale);
+                const w = Math.round(img.naturalWidth  * scale);
                 const h = Math.round(img.naturalHeight * scale);
                 const c = document.createElement('canvas');
                 c.width = w; c.height = h;
                 c.getContext('2d').drawImage(img, 0, 0, w, h);
-                resolve({ dataUrl: c.toDataURL('image/png'), w, h });
+                c.toBlob(blob => blob ? resolve({ blob, w, h }) : reject(new Error('Canvas toBlob failed')), 'image/png');
             };
-            img.onerror = reject;
+            img.onerror = () => reject(new Error('Failed to load image: ' + url.slice(0, 60)));
             img.src = url;
         });
     },
 
     /**
-     * Converts a mask canvas to a scaled base64 PNG (white = fill, black = keep)
-     * The HF inpainting model expects: white pixels = area to repaint
+     * Converts mask canvas alpha channel to a white/black PNG Blob (white = repaint, black = keep).
+     * Scaled to target dimensions to match the source image blob.
      */
-    async maskCanvasToBase64(maskCanvas, targetW, targetH) {
-        const c = document.createElement('canvas');
-        c.width = targetW; c.height = targetH;
-        const ctx = c.getContext('2d');
+    async maskCanvasToBlob(maskCanvas, targetW, targetH) {
+        return new Promise((resolve, reject) => {
+            const c   = document.createElement('canvas');
+            c.width   = targetW;
+            c.height  = targetH;
+            const ctx = c.getContext('2d');
 
-        // Draw mask scaled to target size
-        if (maskCanvas.width > 0 && maskCanvas.height > 0) {
-            ctx.drawImage(maskCanvas, 0, 0, targetW, targetH);
-        }
+            // Draw mask scaled to target size
+            if (maskCanvas && maskCanvas.width > 0 && maskCanvas.height > 0) {
+                ctx.drawImage(maskCanvas, 0, 0, targetW, targetH);
+            }
 
-        // Convert alpha channel to white/black mask
-        const imgData = ctx.getImageData(0, 0, targetW, targetH);
-        const data = imgData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            const alpha = data[i + 3];
-            const val = alpha > 10 ? 255 : 0;
-            data[i] = val;
-            data[i + 1] = val;
-            data[i + 2] = val;
-            data[i + 3] = 255; // fully opaque mask
-        }
-        ctx.putImageData(imgData, 0, 0);
-        return c.toDataURL('image/png');
+            // Convert alpha → white/black (HF expects white = inpaint area)
+            const imgData = ctx.getImageData(0, 0, targetW, targetH);
+            const d = imgData.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const val = d[i + 3] > 10 ? 255 : 0;
+                d[i] = d[i+1] = d[i+2] = val;
+                d[i+3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            c.toBlob(blob => blob ? resolve(blob) : reject(new Error('Mask toBlob failed')), 'image/png');
+        });
     },
 
+    // ─── Core AI Call ───────────────────────────────────────────────────────
     /**
-     * Strips "data:image/png;base64," prefix and returns raw base64 string
+     * Calls HF Inpainting via official @huggingface/inference library.
+     * Uses imageToImage with mask_image parameter.
      */
-    stripPrefix(dataUrl) {
-        return dataUrl.replace(/^data:image\/\w+;base64,/, '');
-    },
-
-    // ─── Core AI Call ─────────────────────────────────────────────────────
-    /**
-     * Calls Hugging Face Inpainting API
-     * @param {string} imageBase64   - Original image (base64, no prefix)
-     * @param {string} maskBase64    - Mask image (base64, no prefix, white=repaint)
-     * @param {string} prompt        - Text description of the material to apply
-     * @returns {Promise<string>}    - Result image as a data URL
-     */
-    async callInpaintingAPI(imageBase64, maskBase64, prompt) {
+    async callHFInpainting(imageBlob, maskBlob, prompt) {
         const token = this.getToken();
-        if (!token) throw new Error('No HF token set');
+        const hf    = new HfInference(token);
 
-        const MODEL = 'https://api-inference.huggingface.co/models/stable-diffusion-v1-5/stable-diffusion-inpainting';
-
-        const response = await fetch(MODEL, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                inputs: prompt,
-                parameters: {
-                    image: imageBase64,
-                    mask_image: maskBase64,
-                    strength: 0.98,
-                    num_inference_steps: 25,
-                    guidance_scale: 7.5,
-                    negative_prompt: 'blurry, distorted, low quality, cartoon, unrealistic, watermark, text',
-                }
-            })
+        // Use the stable diffusion inpainting model
+        const resultBlob = await hf.imageToImage({
+            model: 'stable-diffusion-v1-5/stable-diffusion-inpainting',
+            inputs: imageBlob,
+            parameters: {
+                prompt,
+                mask_image: maskBlob,
+                strength:              0.98,
+                num_inference_steps:   25,
+                guidance_scale:        7.5,
+                negative_prompt:       'blurry, distorted, low quality, cartoon, unrealistic, watermark, text, tiling artifacts',
+            }
         });
 
-        if (!response.ok) {
-            const errText = await response.text();
-            // Model may be loading (503) - give user a clear message
-            if (response.status === 503) {
-                throw new Error('AI model is warming up (30-60 seconds). Please try again in a moment.');
-            }
-            if (response.status === 401) {
-                throw new Error('Invalid Hugging Face token. Please check your API key in AI Settings.');
-            }
-            throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`);
-        }
+        return resultBlob; // Blob
+    },
 
-        // Response is binary image blob
-        const blob = await response.blob();
+    // ─── Blob → DataURL helper ──────────────────────────────────────────────
+    blobToDataUrl(blob) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
+            reader.onload  = () => resolve(reader.result);
             reader.onerror = reject;
             reader.readAsDataURL(blob);
         });
     },
 
-    // ─── Full Pipeline ────────────────────────────────────────────────────
-    /**
-     * Main entry point: applies material to masked region of srcImageNode using AI
-     * @param {Object} srcImageNode     - The building/room image node
-     * @param {Object} materialNode     - The material/texture image node
-     * @param {Function} onProgress     - Callback(message) for status updates
-     * @returns {Promise<string>}       - Final composited image as data URL
-     */
-    async applyMaterial(srcImageNode, materialNode, onProgress) {
-        onProgress('Preparing images for AI...');
+    // ─── Composite AI result back onto original full-res image ──────────────
+    async compositeOnOriginal(originalUrl, maskCanvas, aiResultBlob) {
+        const aiDataUrl = await this.blobToDataUrl(aiResultBlob);
 
-        const srcUrl = srcImageNode.getValue();
-        if (!srcUrl) throw new Error('Source image is empty');
-
-        // 1. Scale original image to 512×512 (API requirement)
-        const { dataUrl: scaledImgUrl, w: aiW, h: aiH } = await this.imageUrlToBase64(srcUrl, 512);
-
-        // 2. Scale mask to same dimensions
-        onProgress('Processing selection mask...');
-        const maskBase64Url = await this.maskCanvasToBase64(srcImageNode.maskCanvas, aiW, aiH);
-
-        // 3. Generate prompt from material filename
-        const prompt = this.generatePrompt(materialNode, srcImageNode);
-        onProgress(`Sending to AI: "${prompt.split(',')[0]}"...`);
-
-        // 4. Call AI API
-        const imageB64 = this.stripPrefix(scaledImgUrl);
-        const maskB64  = this.stripPrefix(maskBase64Url);
-        const aiResultUrl = await this.callInpaintingAPI(imageB64, maskB64, prompt);
-
-        // 5. Composite: paste AI result onto original full-res image only in masked area
-        onProgress('Compositing result onto original image...');
-        const finalUrl = await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultUrl, aiW, aiH);
-
-        onProgress('Done!');
-        return finalUrl;
-    },
-
-    /**
-     * Composites the AI result (at AI resolution) back onto the original full-res image
-     * using the mask, so unmasked areas stay pixel-perfect from the original.
-     */
-    async compositeOnOriginal(originalUrl, maskCanvas, aiResultUrl, aiW, aiH) {
         return new Promise((resolve, reject) => {
-            const origImg   = new Image();
-            const aiImg     = new Image();
+            const origImg = new Image();
+            const aiImg   = new Image();
             origImg.crossOrigin = 'anonymous';
             aiImg.crossOrigin   = 'anonymous';
             let loaded = 0;
@@ -212,37 +147,28 @@ const AI_ENGINE = {
                     const W = origImg.naturalWidth  || origImg.width;
                     const H = origImg.naturalHeight || origImg.height;
 
-                    const c = document.createElement('canvas');
-                    c.width = W; c.height = H;
+                    const c   = document.createElement('canvas');
+                    c.width   = W; c.height = H;
                     const ctx = c.getContext('2d');
-
-                    // 1. Draw original
                     ctx.drawImage(origImg, 0, 0, W, H);
+                    const origData = ctx.getImageData(0, 0, W, H);
 
-                    // 2. Draw AI result ONLY inside the mask using globalCompositeOperation
-                    //    - Save current pixels as "destination"
-                    //    - Draw mask as clipping region
-                    //    - Then draw AI result scaled to full res
-
-                    // Get mask data (scaled to W×H)
-                    const maskC = document.createElement('canvas');
-                    maskC.width = W; maskC.height = H;
+                    // Scale mask to full-res
+                    const maskC   = document.createElement('canvas');
+                    maskC.width   = W; maskC.height = H;
                     const maskCtx = maskC.getContext('2d');
-                    if (maskCanvas.width > 0) {
+                    if (maskCanvas && maskCanvas.width > 0) {
                         maskCtx.drawImage(maskCanvas, 0, 0, W, H);
                     }
                     const maskData = maskCtx.getImageData(0, 0, W, H).data;
 
-                    // Get original data
-                    const origData = ctx.getImageData(0, 0, W, H);
-
-                    // Draw AI result onto temp canvas (scaled to W×H)
-                    const aiC = document.createElement('canvas');
-                    aiC.width = W; aiC.height = H;
+                    // Scale AI result to full-res
+                    const aiC   = document.createElement('canvas');
+                    aiC.width   = W; aiC.height = H;
                     aiC.getContext('2d').drawImage(aiImg, 0, 0, W, H);
                     const aiData = aiC.getContext('2d').getImageData(0, 0, W, H).data;
 
-                    // Blend: where mask alpha > 0, use AI; elsewhere use original
+                    // Blend: where mask alpha > 0, use AI result; elsewhere keep original
                     const out = origData;
                     for (let i = 0; i < maskData.length; i += 4) {
                         const alpha = maskData[i + 3];
@@ -255,18 +181,54 @@ const AI_ENGINE = {
                     }
                     ctx.putImageData(out, 0, 0);
                     resolve(c.toDataURL('image/jpeg', 0.95));
-                } catch (err) {
-                    reject(err);
-                }
+                } catch (err) { reject(err); }
             };
 
-            origImg.onload = onBothLoaded;
-            aiImg.onload   = onBothLoaded;
+            origImg.onload  = onBothLoaded;
+            aiImg.onload    = onBothLoaded;
             origImg.onerror = reject;
             aiImg.onerror   = reject;
-            origImg.src = originalUrl;
-            aiImg.src   = aiResultUrl;
+            origImg.src     = originalUrl;
+            aiImg.src       = aiDataUrl;
         });
+    },
+
+    // ─── Full Pipeline ──────────────────────────────────────────────────────
+    /**
+     * Main entry point: applies material texture to the selected region using AI.
+     * @param {Object}   srcImageNode   - The building/room image node (has maskCanvas)
+     * @param {Object}   materialNode   - The material/texture node
+     * @param {Function} onProgress     - Callback(statusString) for UI updates
+     * @returns {Promise<string>}       - Final composited image as data URL
+     */
+    async applyMaterial(srcImageNode, materialNode, onProgress) {
+        onProgress('Preparing images...');
+
+        const srcUrl = srcImageNode.getValue();
+        if (!srcUrl)                              throw new Error('Source image is empty');
+        if (!srcImageNode.maskCanvas)             throw new Error('No mask found - please draw a selection first');
+
+        // 1. Scale source image to 512×512 Blob (AI max input)
+        onProgress('Scaling source image...');
+        const { blob: imgBlob, w: aiW, h: aiH } = await this.imageUrlToBlob(srcUrl, 512);
+
+        // 2. Scale mask to same dimensions as Blob
+        onProgress('Processing selection mask...');
+        const maskBlob = await this.maskCanvasToBlob(srcImageNode.maskCanvas, aiW, aiH);
+
+        // 3. Generate contextual prompt from material filename
+        const prompt = this.generatePrompt(materialNode);
+        onProgress(`Sending to AI: "${prompt.split(',')[0]}"...`);
+
+        // 4. Call HF Inpainting (official library - handles CORS)
+        const aiResultBlob = await this.callHFInpainting(imgBlob, maskBlob, prompt);
+
+        // 5. Composite AI result back onto original full-resolution image
+        onProgress('Compositing result on original image...');
+        const finalUrl = await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
+
+        onProgress('Done! ✨');
+        return finalUrl;
     }
 };
 
