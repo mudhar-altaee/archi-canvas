@@ -394,7 +394,7 @@ const AI_ENGINE = {
         if (!token) throw new Error('No Fal.ai token configured.');
 
         // FLUX.1 Fill: send image + mask, model auto-handles perspective & lighting
-        const submitResp = await fetch('https://queue.fal.run/fal-ai/flux/fill', {
+        const submitResp = await fetch('https://queue.fal.run/fal-ai/flux-pro/v1/fill', {
             method: 'POST',
             headers: {
                 'Authorization': `Key ${token}`,
@@ -420,7 +420,7 @@ const AI_ENGINE = {
         if (!requestId) throw new Error('Fal.ai queue did not return a request ID.');
 
         // Use the official status_url returned directly by the API
-        const statusUrl = submitResult.status_url || `https://queue.fal.run/fal-ai/flux/fill/requests/${requestId}/status`;
+        const statusUrl = submitResult.status_url || `https://queue.fal.run/fal-ai/flux-pro/v1/fill/requests/${requestId}/status`;
         
         for (let i = 0; i < 120; i++) { // Max 120 seconds for cold start
             await new Promise(res => setTimeout(res, 1000));
@@ -453,7 +453,7 @@ const AI_ENGINE = {
                 }
 
                 // Otherwise fetch from response_url
-                const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/flux/fill/requests/${requestId}`;
+                const responseUrl = pollResult.response_url || submitResult.response_url || `https://queue.fal.run/fal-ai/flux-pro/v1/fill/requests/${requestId}`;
                 const resultResp = await fetch(responseUrl, {
                     headers: { 'Authorization': `Key ${token}` }
                 });
@@ -473,7 +473,7 @@ const AI_ENGINE = {
                 throw new Error('FLUX.1 Fill task failed: ' + JSON.stringify(pollResult.error || 'Unknown'));
             }
         }
-        throw new Error('FLUX.1 Fill request timed out (120s).');
+        throw new Error('FLUX.1 Fill [pro] request timed out (120s).');
     },
 
     // ─── Composite result onto full-resolution original ───────────────────────
