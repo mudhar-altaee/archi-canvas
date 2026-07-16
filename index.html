@@ -353,24 +353,41 @@
     </div>
 
     <div id="ai-token-modal">
-        <div class="ai-modal-card">
+        <div class="ai-modal-card" style="max-width: 500px;">
             <div class="ai-modal-header">
                 <div class="ai-modal-logo">🤖</div>
                 <div>
                     <div class="ai-modal-title">AI Material Engine</div>
-                    <div class="ai-modal-subtitle">Choose your AI provider</div>
+                    <div class="ai-modal-subtitle">Choose your AI provider (FLUX.1 / Stability / HF)</div>
                 </div>
             </div>
 
-            <!-- Option A: Stability AI -->
-            <div style="margin-bottom: 16px; padding: 14px; background: rgba(99,102,241,0.06); border-radius: 12px; border: 1px solid rgba(99,102,241,0.2);">
+            <!-- Option A: Fal.ai (FLUX.1 Fill - RECOMMENDED) -->
+            <div style="margin-bottom: 14px; padding: 14px; background: rgba(16,185,129,0.06); border-radius: 12px; border: 1px solid rgba(16,185,129,0.3);">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <span style="font-size:18px;">👑</span>
+                    <span style="font-family:'Outfit',sans-serif; font-weight:600; color:#a7f3d0; font-size:13px;">Fal.ai (FLUX.1 [Fill])</span>
+                    <span style="font-size:11px; color:#10b981; background:rgba(16,185,129,0.1); padding:2px 7px; border-radius:20px; border:1px solid rgba(16,185,129,0.3);">الاحترافي الأقوى</span>
+                </div>
+                <div style="font-size:12px; color:#64748b; line-height:1.6; margin-bottom:10px;">
+                    أحدث نموذج في العالم • جودة خارقة وخامات معمارية واقعية 100% • سرعة فائقة جداً.<br>
+                    <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener" style="color:#10b981; font-size:11px;">احصل على API Key من fal.ai/dashboard/keys ←</a>
+                </div>
+                <label class="ai-modal-label" style="margin-bottom:5px; color:#10b981;">Fal.ai Key</label>
+                <input id="fal-token-input" class="ai-token-input" type="password"
+                    placeholder="Key xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxxxxxx" autocomplete="off" spellcheck="false"
+                    style="margin-bottom:0; border-color: rgba(16,185,129,0.3)"/>
+            </div>
+
+            <!-- Option B: Stability AI -->
+            <div style="margin-bottom: 14px; padding: 14px; background: rgba(99,102,241,0.06); border-radius: 12px; border: 1px solid rgba(99,102,241,0.2);">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                     <span style="font-size:18px;">⭐</span>
                     <span style="font-family:'Outfit',sans-serif; font-weight:600; color:#c7d2fe; font-size:13px;">Stability AI</span>
-                    <span style="font-size:11px; color:#22c55e; background:rgba(34,197,94,0.1); padding:2px 7px; border-radius:20px; border:1px solid rgba(34,197,94,0.3);">أفضل جودة</span>
+                    <span style="font-size:11px; color:#818cf8; background:rgba(99,102,241,0.1); padding:2px 7px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">ممتاز ومستقر</span>
                 </div>
                 <div style="font-size:12px; color:#64748b; line-height:1.6; margin-bottom:10px;">
-                    25 كريديت مجاني عند التسجيل • جودة عالية • CORS مدعوم 100%<br>
+                    25 نقطة مجانية • دمج ممتاز وسلس جداً للظلال والمنظور.<br>
                     <a href="https://platform.stability.ai/account/keys" target="_blank" rel="noopener" style="color:#6366f1; font-size:11px;">احصل على API Key من platform.stability.ai ←</a>
                 </div>
                 <label class="ai-modal-label" style="margin-bottom:5px;">Stability AI Key</label>
@@ -379,15 +396,15 @@
                     style="margin-bottom:0"/>
             </div>
 
-            <!-- Option B: Hugging Face -->
+            <!-- Option C: Hugging Face -->
             <div style="margin-bottom: 20px; padding: 14px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                     <span style="font-size:18px;">🤗</span>
                     <span style="font-family:'Outfit',sans-serif; font-weight:600; color:#94a3b8; font-size:13px;">Hugging Face</span>
-                    <span style="font-size:11px; color:#f59e0b; background:rgba(245,158,11,0.1); padding:2px 7px; border-radius:20px; border:1px solid rgba(245,158,11,0.3);">مجاني تماماً</span>
+                    <span style="font-size:11px; color:#f59e0b; background:rgba(245,158,11,0.1); padding:2px 7px; border-radius:20px; border:1px solid rgba(245,158,11,0.3);">مجاني بالكامل</span>
                 </div>
                 <div style="font-size:12px; color:#64748b; line-height:1.6; margin-bottom:10px;">
-                    مجاني بالكامل • قد يكون بطيئاً (30-60 ث للتسخين)<br>
+                    مجاني 100% • بطيء نسبياً لتسخين السيرفرات المفتوحة.<br>
                     <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style="color:#6366f1; font-size:11px;">احصل على Token من huggingface.co/settings/tokens ←</a>
                 </div>
                 <label class="ai-modal-label" style="margin-bottom:5px;">HF Access Token (fallback)</label>

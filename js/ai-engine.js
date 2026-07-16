@@ -18,6 +18,9 @@ const AI_ENGINE = {
     getStabilityToken() { return localStorage.getItem('stability_api_token') || ''; },
     setStabilityToken(t){ localStorage.setItem('stability_api_token', t.trim()); },
     hasStabilityToken() { return !!this.getStabilityToken(); },
+    getFalToken()       { return localStorage.getItem('fal_api_token') || ''; },
+    setFalToken(t)      { localStorage.setItem('fal_api_token', t.trim()); },
+    hasFalToken()       { return !!this.getFalToken(); },
 
     // ─── Validate mask has painted pixels ────────────────────────────────────
     maskHasContent(maskCanvas) {
@@ -332,13 +335,74 @@ const AI_ENGINE = {
             'blurry', 'flat texture', 'deformed geometry', 'text', 'watermark', 'bad shading'
         ].join(', ');
 
+    // ─── Strategy A: Fal.ai Inpainting (SDXL Fast - CORS supported via direct keys) ───
+    async callFalInpainting(imageDataUrl, maskDataUrl, prompt) {
+        const token = this.getFalToken();
+        if (!token) throw new Error('No Fal.ai token set');
+
+        // Submit to queue
+        const submitResp = await fetch('https://queue.fal.run/fal-ai/fast-sdxl/inpainting', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Key ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                image_url: imageDataUrl,
+                mask_url: maskDataUrl,
+                prompt: prompt,
+                negative_prompt: 'blurry, low quality, deformed, flat texture, watermark, text',
+                strength: 0.30,           // Keeps pre-warped texture pattern intact
+                num_inference_steps: 28,
+                guidance_scale: 7.5
+            })
+        });
+
+        if (!submitResp.ok) {
+            const txt = await submitResp.text();
+            throw new Error(`Fal.ai submission failed (${submitResp.status}): ${txt.slice(0, 200)}`);
+        }
+
+        const submitResult = await submitResp.json();
+        const requestId = submitResult.request_id;
+        if (!requestId) throw new Error('Fal.ai queue did not return a request ID.');
+
+        // Poll status url
+        const statusUrl = `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
+        
+        for (let i = 0; i < 45; i++) { // Max 45 seconds polling
+            await new Promise(res => setTimeout(res, 1000));
+            const pollResp = await fetch(statusUrl, {
+                headers: { 'Authorization': `Key ${token}` }
+            });
+            if (!pollResp.ok) continue;
+
+            const pollResult = await pollResp.json();
+            if (pollResult.status === 'COMPLETED') {
+                const imgUrl = pollResult.images?.[0]?.url;
+                if (!imgUrl) throw new Error('Fal.ai returned completion but no image.');
+                
+                const imgResp = await fetch(imgUrl);
+                return await imgResp.blob();
+            }
+            if (pollResult.status === 'FAILED') {
+                throw new Error('Fal.ai queue task failed: ' + JSON.stringify(pollResult.error || 'Unknown error'));
+            }
+        }
+        throw new Error('Fal.ai request timed out.');
+    },
+
+    // ─── Strategy B: Stability AI ────────────────────────────────────────────
+    async callStabilityAI(imgBlob, maskBlob, prompt) {
+        const token = this.getStabilityToken();
+
         const formData = new FormData();
-        formData.append('image',          preTexturedBlob, 'image.png');
-        formData.append('mask',           maskBlob,        'mask.png');
+        formData.append('image',          imgBlob,  'image.png');
+        formData.append('mask',           maskBlob, 'mask.png');
         formData.append('prompt',         prompt);
-        formData.append('negative_prompt', negative);
+        formData.append('negative_prompt','blurry, distorted, cartoonish, low resolution, watermark, text, deformed');
         formData.append('output_format',  'jpeg');
-        formData.append('strength',       '0.28');   // Preserves texture orientation, adds shading/depth
+        formData.append('strength',       '0.28');  // 0.28 = blend, add depth and shadows
         formData.append('grow_mask',      '3');
 
         const resp = await fetch(
@@ -347,7 +411,7 @@ const AI_ENGINE = {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Accept':        'image/*',
+                    'Accept': 'image/*',
                 },
                 body: formData,
             }
@@ -358,6 +422,45 @@ const AI_ENGINE = {
             if (resp.status === 401) throw new Error('Invalid Stability AI key.');
             if (resp.status === 402) throw new Error('Stability AI: No credits left.');
             throw new Error(`Stability AI error: ${txt.slice(0, 200)}`);
+        }
+        return await resp.blob();
+    },
+
+    // ─── Strategy C: HF Router (fallback) ────────────────────────────────────
+    async callHFRouter(imgBase64, maskBase64, prompt) {
+        const token = this.getToken();
+        const resp  = await fetch(
+            'https://router.huggingface.co/hf-inference/models/stable-diffusion-v1-5/stable-diffusion-inpainting',
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(120_000),
+                body: JSON.stringify({
+                    inputs: prompt,
+                    parameters: {
+                        image:               imgBase64,
+                        mask_image:          maskBase64,
+                        strength:            0.99,
+                        num_inference_steps: 25,
+                        guidance_scale:      8.0,
+                        negative_prompt:     'blurry, distorted, low quality, cartoon, unrealistic, deformed',
+                    }
+                })
+            }
+        );
+
+        if (resp.status === 503) {
+            const body = await resp.json().catch(() => ({}));
+            const wait = Math.ceil(body.estimated_time || 30);
+            throw new Error(`AI model warming up (est. ${wait}s). Please try again in a moment.`);
+        }
+        if (resp.status === 401) throw new Error('Invalid Hugging Face token. Update it in AI Settings.');
+        if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(`HF API error ${resp.status}: ${txt.slice(0, 200)}`);
         }
         return await resp.blob();
     },
@@ -453,12 +556,32 @@ const AI_ENGINE = {
         );
 
         // 2. AI Enhancement
+        // ── Option A: Fal.ai (SDXL Fast / FLUX.1 Fill) ──
+        if (this.hasFalToken()) {
+            onProgress('🧠 AI (Fal.ai): rendering realistic lighting, shadows, and perspective...');
+            const preTexturedDataUrl = classicCanvas.toDataURL('image/jpeg', 0.90);
+            const maskCanvas64       = this.buildBinaryMask(srcImageNode.maskCanvas, aiW, aiH);
+            const maskDataUrl        = maskCanvas64.toDataURL('image/png');
+            const prompt             = await this.generatePrompt(materialNode);
+
+            try {
+                const aiResultBlob = await this.callFalInpainting(preTexturedDataUrl, maskDataUrl, prompt);
+                onProgress('Compositing final result...');
+                return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, aiResultBlob);
+            } catch (err) {
+                console.warn('Fal.ai failed, falling back:', err.message);
+                onProgress('Fal.ai failed – falling back...');
+            }
+        }
+
+        // ── Option B: Stability AI ──
         if (this.hasStabilityToken()) {
-            onProgress('🧠 AI rendering realistic lighting and shading (preserving perspective)...');
+            onProgress('🧠 AI (Stability): rendering realistic lighting and shading (preserving perspective)...');
 
             const preTexturedBlob = await this.canvasToBlob(classicCanvas);
             const maskCanvas64    = this.buildBinaryMask(srcImageNode.maskCanvas, aiW, aiH);
             const maskBlob        = await this.canvasToBlob(maskCanvas64);
+            const prompt             = await this.generatePrompt(materialNode);
 
             try {
                 const aiResultBlob = await this.stabilityEnhance(preTexturedBlob, maskBlob);
@@ -475,6 +598,6 @@ const AI_ENGINE = {
         const classicBlob = await this.canvasToBlob(classicCanvas, 'image/jpeg');
         return await this.compositeOnOriginal(srcUrl, srcImageNode.maskCanvas, classicBlob);
     }
-};
+}
 
 export default AI_ENGINE;
