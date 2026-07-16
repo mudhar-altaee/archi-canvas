@@ -412,7 +412,7 @@ const AI_ENGINE = {
         const requestId = submitResult.request_id;
         if (!requestId) throw new Error('Fal.ai queue did not return a request ID.');
 
-        const statusUrl = `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
+        const statusUrl = `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}/status`;
         
         for (let i = 0; i < 45; i++) {
             await new Promise(res => setTimeout(res, 1000));
@@ -423,13 +423,22 @@ const AI_ENGINE = {
 
             const pollResult = await pollResp.json();
             if (pollResult.status === 'COMPLETED') {
-                const imgUrl = pollResult.images?.[0]?.url;
-                if (!imgUrl) throw new Error('Fal.ai returned completion but no image.');
+                // Fetch the response payload from response_url
+                const responseUrl = pollResult.response_url || `https://queue.fal.run/fal-ai/fast-sdxl/inpainting/requests/${requestId}`;
+                const resultResp = await fetch(responseUrl, {
+                    headers: { 'Authorization': `Key ${token}` }
+                });
+                if (!resultResp.ok) throw new Error('Failed to retrieve Fal.ai output payload.');
+
+                const resultData = await resultResp.json();
+                const imgUrl = resultData.images?.[0]?.url;
+                if (!imgUrl) throw new Error('Fal.ai output payload did not contain any images.');
+
                 const imgResp = await fetch(imgUrl);
                 return await imgResp.blob();
             }
             if (pollResult.status === 'FAILED') {
-                throw new Error('Fal.ai failed: ' + JSON.stringify(pollResult.error || 'Unknown error'));
+                throw new Error('Fal.ai queue task failed: ' + JSON.stringify(pollResult.error || 'Unknown error'));
             }
         }
         throw new Error('Fal.ai request timed out.');
