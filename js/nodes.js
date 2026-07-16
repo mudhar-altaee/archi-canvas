@@ -2284,6 +2284,7 @@ export class MaterialNode extends Node {
         this.type = 'material';
         this.recoloredDataUrl = null;
         this.textureScale = 1.0; // Default material texture scale factor
+        this.projectionMode = 'auto'; // Default 3D projection mode: 'auto', 'flat', 'curved', 'slanted-left', 'slanted-right'
         
         // Enforce fixed 250x250 size
         this.width = 250;
@@ -2584,28 +2585,34 @@ export class MaterialNode extends Node {
                             let tu = 0;
                             let tv = mWidth > 0 ? ((y - yMin) / mWidth) * (texW / texH) : 0;
                             
-                            if (hasVerticalCorner) {
-                                // Split mapping at the corner to warp both surfaces separately
-                                if (x < cornerX) {
-                                    const t = (x - xMin) / (cornerX - xMin);
-                                    // Squeeze near the corner to simulate perspective tilt
-                                    const tWarped = Math.pow(t, 1.35);
-                                    tu = tWarped * 0.5;
-                                } else {
-                                    const t = (x - cornerX) / (xMax - cornerX);
-                                    // Squeeze near the corner to simulate perspective tilt
-                                    const tWarped = 1 - Math.pow(1 - t, 1.35);
-                                    tu = 0.5 + tWarped * 0.5;
-                                }
-                            } else if (isVerticalStructure) {
-                                // Cylindrical/Curved column wrap
-                                const t = mWidth > 0 ? (x - xMin) / mWidth : 0.5;
+                            const pMode = this.projectionMode || 'auto';
+                            const t = mWidth > 0 ? (x - xMin) / mWidth : 0.5;
+                            
+                            if (pMode === 'flat') {
+                                tu = t;
+                            } else if (pMode === 'curved') {
                                 const theta = Math.max(-0.98, Math.min(0.98, t * 2 - 1));
-                                const tWarped = (Math.asin(theta) / (Math.PI / 2) + 1) / 2;
-                                tu = tWarped;
+                                tu = (Math.asin(theta) / (Math.PI / 2) + 1) / 2;
+                            } else if (pMode === 'slanted-left') {
+                                tu = Math.pow(t, 1.45);
+                            } else if (pMode === 'slanted-right') {
+                                tu = 1 - Math.pow(1 - t, 1.45);
                             } else {
-                                // Flat standard surface mapping
-                                tu = mWidth > 0 ? (x - xMin) / mWidth : 0;
+                                // Default/Auto mode
+                                if (hasVerticalCorner) {
+                                    if (x < cornerX) {
+                                        const sideT = (x - xMin) / (cornerX - xMin);
+                                        tu = Math.pow(sideT, 1.35) * 0.5;
+                                    } else {
+                                        const sideT = (x - cornerX) / (xMax - cornerX);
+                                        tu = 0.5 + (1 - Math.pow(1 - sideT, 1.35)) * 0.5;
+                                    }
+                                } else if (isVerticalStructure) {
+                                    const theta = Math.max(-0.98, Math.min(0.98, t * 2 - 1));
+                                    tu = (Math.asin(theta) / (Math.PI / 2) + 1) / 2;
+                                } else {
+                                    tu = t;
+                                }
                             }
                             
                             // Map normalized (tu, tv) coordinates to texture dimensions

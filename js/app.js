@@ -447,6 +447,7 @@ class App {
             } else if (node.type === 'material') {
                 base.recoloredDataUrl = node.recoloredDataUrl || null;
                 base.textureScale = node.textureScale || 1.0;
+                base.projectionMode = node.projectionMode || 'auto';
             }
             nodesData.push(base);
         });
@@ -537,6 +538,7 @@ class App {
                         node = new MaterialNode(nData.id, nData.x, nData.y, this.canvas, this);
                         node.recoloredDataUrl = nData.recoloredDataUrl || null;
                         node.textureScale = nData.textureScale || 1.0;
+                        node.projectionMode = nData.projectionMode || 'auto';
                     }
                     
                     if (node) {
@@ -849,6 +851,19 @@ class App {
                         <input id="prop-scale-slider" type="range" min="0.1" max="5.0" step="0.05" value="${node.textureScale}" style="width: 100%; height: 6px; accent-color: var(--accent); cursor: pointer;" ${disabledAttr}>
                     </div>
                 </div>
+                
+                <div class="prop-row" style="margin-top: 12px;">
+                    <div class="prop-group" style="width: 100%;">
+                        <span class="prop-label">3D Projection Mode (اتجاه الإسقاط ثلاثي الأبعاد)</span>
+                        <select id="prop-projection-mode" class="prop-input" style="width: 100%; padding: 6px; border-radius: 6px; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-color); cursor: pointer; margin-top: 4px;" ${disabledAttr}>
+                            <option value="auto" ${node.projectionMode === 'auto' ? 'selected' : ''}>Auto-Detect (تلقائي ذكي)</option>
+                            <option value="flat" ${node.projectionMode === 'flat' ? 'selected' : ''}>Flat / Front (مسطح مواجه)</option>
+                            <option value="curved" ${node.projectionMode === 'curved' ? 'selected' : ''}>Cylinder / Curved (أسطواني/منحني)</option>
+                            <option value="slanted-left" ${node.projectionMode === 'slanted-left' ? 'selected' : ''}>Slanted Left (مائل للييسار)</option>
+                            <option value="slanted-right" ${node.projectionMode === 'slanted-right' ? 'selected' : ''}>Slanted Right (مائل للييمين)</option>
+                        </select>
+                    </div>
+                </div>
             `;
         }
         
@@ -957,6 +972,14 @@ class App {
                     const val = parseFloat(e.target.value);
                     node.textureScale = val;
                     valLabel.textContent = `${val.toFixed(2)}x`;
+                    this.saveProject(this.activeProjectName);
+                });
+            }
+            
+            const projSelect = document.getElementById('prop-projection-mode');
+            if (projSelect) {
+                projSelect.addEventListener('change', (e) => {
+                    node.projectionMode = e.target.value;
                     this.saveProject(this.activeProjectName);
                 });
             }
