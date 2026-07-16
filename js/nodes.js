@@ -388,6 +388,89 @@ export class Node {
                         this.currentTool = 'perspective';
                         this.lassoPoints = [];
                         this.isLassoActive = false;
+                        
+                        // ---- AUTO-QUAD DETECTION ----
+                        // If we already have a user-placed plane, don't overwrite it
+                        const alreadyHasUserPlane = this.perspectivePlanes &&
+                            this.perspectivePlanes.length > 0 &&
+                            this.perspectivePlanes[0]._autoPlaced !== true;
+                        
+                        if (!alreadyHasUserPlane && this.maskCanvas) {
+                            try {
+                                const maskCtx = this.maskCanvas.getContext('2d');
+                                const maskData = maskCtx.getImageData(0, 0, this.maskCanvas.width, this.maskCanvas.height);
+                                const mask = maskData.data;
+                                const W = this.maskCanvas.width;
+                                const H = this.maskCanvas.height;
+                                
+                                // 1. Find bounding box of the masked region
+                                let xMin = W, xMax = 0, yMin = H, yMax = 0;
+                                let hasMaskPixels = false;
+                                // Also collect top/bottom x positions for trapezoid detection
+                                const topRowX = [];
+                                const botRowX = [];
+                                
+                                for (let y = 0; y < H; y++) {
+                                    let rowFirst = -1, rowLast = -1;
+                                    for (let x = 0; x < W; x++) {
+                                        const a = mask[(y * W + x) * 4 + 3];
+                                        if (a > 20) {
+                                            hasMaskPixels = true;
+                                            if (x < xMin) xMin = x;
+                                            if (x > xMax) xMax = x;
+                                            if (y < yMin) yMin = y;
+                                            if (y > yMax) yMax = y;
+                                            if (rowFirst === -1) rowFirst = x;
+                                            rowLast = x;
+                                        }
+                                    }
+                                    if (rowFirst !== -1) {
+                                        // Collect first/last x for top and bottom thirds
+                                        if (y < H * 0.35) {
+                                            topRowX.push({ first: rowFirst, last: rowLast });
+                                        } else if (y > H * 0.65) {
+                                            botRowX.push({ first: rowFirst, last: rowLast });
+                                        }
+                                    }
+                                }
+                                
+                                if (hasMaskPixels) {
+                                    // 2. Compute average first/last x for top and bottom to detect trapezoid perspective
+                                    let tl_x = xMin, tr_x = xMax;
+                                    let bl_x = xMin, br_x = xMax;
+                                    
+                                    if (topRowX.length > 3) {
+                                        tl_x = topRowX.reduce((s, r) => s + r.first, 0) / topRowX.length;
+                                        tr_x = topRowX.reduce((s, r) => s + r.last, 0) / topRowX.length;
+                                    }
+                                    if (botRowX.length > 3) {
+                                        bl_x = botRowX.reduce((s, r) => s + r.first, 0) / botRowX.length;
+                                        br_x = botRowX.reduce((s, r) => s + r.last, 0) / botRowX.length;
+                                    }
+                                    
+                                    // 3. Add a small padding inward so pins sit clearly inside the surface
+                                    const padX = Math.max(2, (xMax - xMin) * 0.02);
+                                    const padY = Math.max(2, (yMax - yMin) * 0.02);
+                                    
+                                    const newPlane = {
+                                        id: Date.now(),
+                                        _autoPlaced: true, // mark as auto-placed so next manual click resets it
+                                        points: [
+                                            { x: Math.max(0, tl_x + padX),         y: Math.max(0, yMin + padY) },       // TL
+                                            { x: Math.min(W - 1, tr_x - padX),      y: Math.max(0, yMin + padY) },       // TR
+                                            { x: Math.min(W - 1, br_x - padX),      y: Math.min(H - 1, yMax - padY) },   // BR
+                                            { x: Math.max(0, bl_x + padX),          y: Math.min(H - 1, yMax - padY) }    // BL
+                                        ]
+                                    };
+                                    this.perspectivePlanes = [newPlane];
+                                    this.activePlaneId = newPlane.id;
+                                }
+                            } catch (err) {
+                                console.warn('Auto-Quad Detection failed, falling back to default quad:', err);
+                            }
+                        }
+                        // ---- END AUTO-QUAD DETECTION ----
+                        
                         if (typeof this.drawSelectionCanvas === 'function') this.drawSelectionCanvas();
                     });
                 }
@@ -1862,6 +1945,8 @@ export class ImageNode extends Node {
                     if (pt) {
                         pt.x = Math.max(0, Math.min(this.width, x));
                         pt.y = Math.max(0, Math.min(this.height, y));
+                        // User is manually adjusting: mark as user-placed so Auto-Quad won't reset it next time
+                        delete activePlane._autoPlaced;
                     }
                 }
                 this.drawSelectionCanvas();
