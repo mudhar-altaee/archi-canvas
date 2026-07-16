@@ -2568,6 +2568,39 @@ export class MaterialNode extends Node {
                     // We have a corner/crease if maxEdgeSum is above a threshold
                     const hasVerticalCorner = maxEdgeSum > 14 && cornerX !== -1;
                     
+                    // 3. Scan for dominant architectural lines slope to auto-align texture perspective
+                    const getLum = (px, py) => {
+                        const idx = (py * canvasW + px) * 4;
+                        if (idx < 0 || idx >= pixels.length) return 128;
+                        return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
+                    };
+                    
+                    let sumSlope = 0;
+                    let weightSum = 0;
+                    
+                    for (let y = yMin + 2; y < yMax - 2; y += 4) {
+                        for (let x = xMin + 2; x < xMax - 2; x += 4) {
+                            const maskIdx = (y * canvasW + x) * 4;
+                            if (maskIdx >= 0 && maskIdx < maskPixels.length && maskPixels[maskIdx + 3] > 30) {
+                                const gx = getLum(x + 1, y) - getLum(x - 1, y);
+                                const gy = getLum(x, y + 1) - getLum(x, y - 1);
+                                const mag = Math.sqrt(gx * gx + gy * gy);
+                                if (mag > 15) {
+                                    const angle = Math.atan2(gy, gx);
+                                    const absAngle = Math.abs(angle);
+                                    if (absAngle > Math.PI / 6 && absAngle < 5 * Math.PI / 6) {
+                                        const slope = -gx / (gy || 1);
+                                        if (Math.abs(slope) < 0.6) {
+                                            sumSlope += slope * mag;
+                                            weightSum += mag;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    const dominantSlope = weightSum > 0 ? (sumSlope / weightSum) : 0;
                     const tScale = this.textureScale || 1.0;
                     
                     for (let i = 0; i < pixels.length; i += 4) {
@@ -2585,6 +2618,12 @@ export class MaterialNode extends Node {
                             let tu = 0;
                             let tv = mWidth > 0 ? ((y - yMin) / mWidth) * (texW / texH) : 0;
                             
+                            // Shear texture horizontally based on dominant slope of the architecture
+                            if (Math.abs(dominantSlope) > 0.015) {
+                                const xCenter = (xMin + xMax) / 2;
+                                tv += ((x - xCenter) / mWidth) * dominantSlope * (texW / texH);
+                            }
+                            
                             const pMode = this.projectionMode || 'auto';
                             const t = mWidth > 0 ? (x - xMin) / mWidth : 0.5;
                             
@@ -2599,7 +2638,14 @@ export class MaterialNode extends Node {
                                 tu = 1 - Math.pow(1 - t, 1.45);
                             } else {
                                 // Default/Auto mode
-                                if (hasVerticalCorner) {
+                                if (Math.abs(dominantSlope) > 0.035) {
+                                    // Auto-align perspective squeeze based on detected slope
+                                    if (dominantSlope > 0) {
+                                        tu = 1 - Math.pow(1 - t, 1.4);
+                                    } else {
+                                        tu = Math.pow(t, 1.4);
+                                    }
+                                } else if (hasVerticalCorner) {
                                     if (x < cornerX) {
                                         const sideT = (x - xMin) / (cornerX - xMin);
                                         tu = Math.pow(sideT, 1.35) * 0.5;
