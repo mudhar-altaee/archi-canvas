@@ -170,22 +170,24 @@ class App {
         if (tokenSaveBtn) {
             tokenSaveBtn.addEventListener('click', () => {
                 const falVal  = falTokenInput   ? falTokenInput.value.trim()  : '';
+                let cleanVal = falVal;
+                if (cleanVal.startsWith('Key ')) {
+                    cleanVal = cleanVal.replace('Key ', '').trim();
+                }
 
-                if (!falVal || !falVal.startsWith('Key ')) {
+                if (!cleanVal) {
                     if (falTokenInput) {
                         falTokenInput.style.borderColor = '#ef4444';
                         falTokenInput.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
-                        falTokenInput.placeholder = 'يجب أن يبدأ المفتاح بـ Key ';
                         setTimeout(() => {
                             falTokenInput.style.borderColor = '';
                             falTokenInput.style.boxShadow = '';
-                            falTokenInput.placeholder = 'Key xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxxxxxx';
-                        }, 2500);
+                        }, 2000);
                     }
                     return;
                 }
 
-                this.aiEngine.setFalToken(falVal);
+                this.aiEngine.setFalToken(cleanVal);
                 updateStatusDot();
                 if (tokenModal) tokenModal.classList.remove('active');
             });
