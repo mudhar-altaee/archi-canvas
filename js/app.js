@@ -137,67 +137,55 @@ class App {
     // ─── AI Engine UI ──────────────────────────────────────────────────────
     initAI() {
         const tokenModal       = document.getElementById('ai-token-modal');
-        const hfTokenInput     = document.getElementById('ai-token-input');
-        const stabTokenInput   = document.getElementById('stability-token-input');
         const falTokenInput    = document.getElementById('fal-token-input');
         const tokenSaveBtn     = document.getElementById('ai-token-save');
         const tokenSkipBtn     = document.getElementById('ai-token-skip');
         const settingsBtn      = document.getElementById('btn-ai-settings');
         const statusDot        = document.getElementById('ai-status-dot');
 
-        // Status dot = green if any token is present
+        // Status dot = green if Fal token is present
         const updateStatusDot = () => {
             if (statusDot) {
-                const hasAny = this.aiEngine.hasToken() || 
-                               this.aiEngine.hasStabilityToken() || 
-                               this.aiEngine.hasFalToken();
-                statusDot.classList.toggle('connected', hasAny);
+                statusDot.classList.toggle('connected', this.aiEngine.hasFalToken());
             }
         };
         updateStatusDot();
 
-        // Show modal on first load if no tokens at all
-        const hasAny = this.aiEngine.hasToken() || 
-                       this.aiEngine.hasStabilityToken() || 
-                       this.aiEngine.hasFalToken();
-        if (!hasAny) {
+        // Show modal on first load if no token
+        if (!this.aiEngine.hasFalToken()) {
             setTimeout(() => { if (tokenModal) tokenModal.classList.add('active'); }, 800);
         }
 
-        // AI Settings button → open modal and populate fields
+        // AI Settings button → open modal and populate
         if (settingsBtn) {
             settingsBtn.addEventListener('click', () => {
                 if (tokenModal) {
-                    if (hfTokenInput)   hfTokenInput.value   = this.aiEngine.getToken();
-                    if (stabTokenInput) stabTokenInput.value = this.aiEngine.getStabilityToken();
                     if (falTokenInput)  falTokenInput.value  = this.aiEngine.getFalToken();
                     tokenModal.classList.add('active');
                 }
             });
         }
 
-        // Save button: save all tokens (at least one must be provided)
+        // Save button
         if (tokenSaveBtn) {
             tokenSaveBtn.addEventListener('click', () => {
-                const hfVal   = hfTokenInput   ? hfTokenInput.value.trim()   : '';
-                const stabVal = stabTokenInput  ? stabTokenInput.value.trim() : '';
                 const falVal  = falTokenInput   ? falTokenInput.value.trim()  : '';
 
-                if (!hfVal && !stabVal && !falVal) {
-                    // Highlight inputs in red
-                    [hfTokenInput, stabTokenInput, falTokenInput].forEach(inp => {
-                        if (!inp) return;
-                        inp.style.borderColor = '#ef4444';
-                        inp.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
-                        setTimeout(() => { inp.style.borderColor = ''; inp.style.boxShadow = ''; }, 2000);
-                    });
+                if (!falVal || !falVal.startsWith('Key ')) {
+                    if (falTokenInput) {
+                        falTokenInput.style.borderColor = '#ef4444';
+                        falTokenInput.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.2)';
+                        falTokenInput.placeholder = 'يجب أن يبدأ المفتاح بـ Key ';
+                        setTimeout(() => {
+                            falTokenInput.style.borderColor = '';
+                            falTokenInput.style.boxShadow = '';
+                            falTokenInput.placeholder = 'Key xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxxxxxx';
+                        }, 2500);
+                    }
                     return;
                 }
 
-                if (falVal)  this.aiEngine.setFalToken(falVal);
-                if (stabVal) this.aiEngine.setStabilityToken(stabVal);
-                if (hfVal)   this.aiEngine.setToken(hfVal);
-
+                this.aiEngine.setFalToken(falVal);
                 updateStatusDot();
                 if (tokenModal) tokenModal.classList.remove('active');
             });
